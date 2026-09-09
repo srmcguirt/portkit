@@ -20,8 +20,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
+use portkit_core::rewrite::{detect_definition_search, fingerprint, Rewrite};
 use portkit_core::trace::{self, CallRecord, JsonlRecorder, Outcome, Recorder, Surface};
 use portkit_core::watch::{inspect, Thresholds};
 use portkit_core::Config;
@@ -49,12 +50,122 @@ pub fn run(event: &str, config: &Config) -> ExitCode {
     let payload: Payload = serde_json::from_str(&raw).unwrap_or_default();
 
     match event {
+        "pre-tool-use" => rewrite(&payload, config),
         "post-tool-use" => record(&payload, config),
         "user-prompt-submit" => suggest(&payload, config),
         "session-end" => summarize(&payload, config),
         _ => {}
     }
     ExitCode::SUCCESS
+}
+
+/// How hot a command shape must be before a rewrite is worth verifying.
+///
+/// Count alone ranks `true` (67 calls, 31 bytes) with `sed -n` (185 calls,
+/// 4,948 bytes each). Weighting by what a shape actually costs separates them,
+/// and keeps the verification tax off commands that are cheap anyway.
+const MIN_REPEATS: usize = 3;
+const MIN_TOTAL_BYTES: usize = 4_096;
+
+/// Rewrite a hot, verifiably-replaceable command into a cheaper one.
+///
+/// Returns nothing at all in every uncertain case. A wrong rewrite is
+/// unrecoverable — the agent never sees the command it asked for — so the bar
+/// is a verified answer, not a plausible one.
+fn rewrite(payload: &Payload, config: &Config) {
+    if payload.tool_name != "Bash" {
+        // additionalContext does not surface on MCP tool calls, and rewriting
+        // anything but a shell command is out of scope.
+        return;
+    }
+    let Some(command) = payload.tool_input.get("command").and_then(Value::as_str) else {
+        return;
+    };
+
+    let Some(candidate) = detect_definition_search(command) else {
+        return;
+    };
+    if !is_hot(config, command) {
+        return;
+    }
+    // Verification runs the replacement for real. Skipped for cold shapes so
+    // the cost lands only where a rewrite is actually in prospect.
+    if !verifies(&candidate) {
+        return;
+    }
+
+    let mut updated = payload.tool_input.clone();
+    if let Some(obj) = updated.as_object_mut() {
+        obj.insert("command".into(), Value::String(candidate.command.clone()));
+    }
+
+    let out = json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "updatedInput": updated,
+            // One line, once — enough for the agent to learn the tool exists
+            // without paying for a reminder on every call.
+            "additionalContext": candidate.note,
+        }
+    });
+    println!("{out}");
+}
+
+/// Has this command shape been run often enough, and cost enough, to bother?
+fn is_hot(config: &Config, command: &str) -> bool {
+    if !config.trace.enabled {
+        // Without a ledger there is no evidence, and a rewrite on no evidence
+        // is a guess.
+        return false;
+    }
+    let path = trace_dir(config).join(format!("{}.jsonl", today()));
+    let Ok(records) = trace::read_jsonl(&path) else {
+        return false;
+    };
+
+    let shape = fingerprint(command);
+    let matching: Vec<&CallRecord> = records
+        .iter()
+        .filter(|r| {
+            r.target.as_deref().is_some_and(|t| {
+                shape.starts_with(t) || t.starts_with(&shape[..shape.len().min(12)])
+            })
+        })
+        .collect();
+
+    let total: usize = matching.iter().map(|r| r.delivered_bytes).sum();
+    matching.len() >= MIN_REPEATS && total >= MIN_TOTAL_BYTES
+}
+
+/// Run the replacement and check it answers the question.
+///
+/// The gate is "contains what the original would have matched", not "produces
+/// the same bytes". Byte-equality would forbid the whole point: a symbol
+/// lookup returns 40-60x less than the file, and cannot be byte-equal to a
+/// grep over it.
+fn verifies(candidate: &Rewrite) -> bool {
+    let Some((program, args)) = split_command(&candidate.command) else {
+        return false;
+    };
+    let Ok(output) = std::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .output()
+    else {
+        return false;
+    };
+    if !output.status.success() {
+        return false;
+    }
+    String::from_utf8_lossy(&output.stdout).contains(&candidate.verify_contains)
+}
+
+/// Split our own generated command. Not a shell parser — it only ever sees
+/// strings this crate produced.
+fn split_command(command: &str) -> Option<(String, Vec<String>)> {
+    let mut parts = command.split_whitespace().map(str::to_string);
+    let program = parts.next()?;
+    Some((program, parts.collect()))
 }
 
 fn trace_dir(config: &Config) -> PathBuf {
