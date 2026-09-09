@@ -1,0 +1,257 @@
+# portkit
+
+A Rust CLI template for porting tested Python agentic processes to Rust tooling —
+usable as a **CLI**, an **MCP server**, and a **library**, with a parity harness
+that proves the port is faithful.
+
+Define a tool once. Get three surfaces and a regression test for free.
+
+```
+                         ┌─────────────────┐
+   impl Tool for Mine ──▶│    Registry     │
+                         └────────┬────────┘
+              ┌───────────────────┼───────────────────┐
+              ▼                   ▼                   ▼
+        pk run mine          pk serve            pk port replay
+       (CLI, humans)      (MCP, agents)      (parity vs. Python)
+```
+
+## Why
+
+Porting an agentic process from Python to Rust is easy to start and hard to
+finish, because "it looks equivalent" is not a claim CI can check. portkit makes
+equivalence a build artifact: capture what the Python implementation actually
+returns, commit those fixtures, and fail the build when the Rust port drifts.
+
+It checks that through the **MCP surface** as well as direct calls — a tool that
+is correct in Rust but wrong through `tools/call` is still broken for the agent
+that has to use it.
+
+## Quickstart
+
+```bash
+git clone https://github.com/srmcguirt/portkit && cd portkit
+cargo build
+
+pk tools                                    # what is registered
+pk run word_frequency -a text='a b a b c'   # call one
+pk run word_frequency -a text='a b' --through-mcp   # call it as an agent would
+pk serve                                    # speak MCP on stdio
+```
+
+The demo tools ship with a matching Python reference, so the whole porting loop
+runs out of the box:
+
+```bash
+just capture   # run examples/python/agent.py over examples/cases.jsonl
+just replay    # replay the captured fixtures against the Rust port
+```
+
+```
+  surface: direct
+  chunk_text                       5/5    PASS
+  word_frequency                   5/5    PASS
+
+  surface: mcp
+  chunk_text                       5/5    PASS
+  word_frequency                   5/5    PASS
+
+  10 passed, 0 failed, 0 errored, 0 not ported (10 total)
+```
+
+## The porting workflow
+
+**1. Write cases** — a JSONL file of inputs worth pinning. Include the edge cases
+your Python tests already cover.
+
+```jsonl
+{"tool": "word_frequency", "id": "shares-are-thirds", "input": {"text": "a b c a b c"}}
+```
+
+**2. Capture what Python does.** The contract is one JSON request on stdin, one
+JSON result on stdout — small enough to bolt onto an existing codebase without
+restructuring it. See [`examples/python/agent.py`](examples/python/agent.py).
+
+```bash
+pk port capture --cmd 'python3 agent.py' --cases cases.jsonl --out fixtures/
+```
+
+**3. Implement the tool in Rust**, then replay until it matches.
+
+```bash
+pk port replay --fixtures fixtures/
+```
+
+**4. Wire it into CI** with a test, so drift fails the build:
+
+```rust
+#[tokio::test]
+async fn matches_the_python_reference() {
+    portkit_port::assert_parity("fixtures", &registry()).await;
+}
+```
+
+### Floating point
+
+Python and Rust sum in different orders and round differently at the last place.
+Demanding bit equality flags every port as broken, so comparison is tolerant by
+default (`epsilon = 1e-9`, absolute and relative), while **integers compare
+exactly** — an off-by-one count is a bug, not rounding.
+
+```bash
+pk port replay --epsilon 1e-6        # loosen for a noisy pipeline
+PK_PARITY__EPSILON=0 pk port replay  # demand exactness
+```
+
+### Differences you accept on purpose
+
+Real ports rarely end at byte equality: a Rust library will differ from its
+Python counterpart somewhere. The honest outcome is a port that matches
+everywhere except a few places you have understood and written down.
+
+Record those on the fixture, and they stop failing the build without going
+silent — the reason shows up in every report, where review can audit it:
+
+```json
+{
+  "tool": "format_markdown",
+  "id": "escaped-hyphen",
+  "input": { "text": "a \\- b" },
+  "expected": { "out": "a \\- b" },
+  "accepted": [
+    {
+      "path": "/out",
+      "reason": "comrak drops the escape during parsing; not recoverable post-hoc"
+    }
+  ]
+}
+```
+
+Exemptions are scoped to a JSON Pointer path, so accepting one field never
+quietly excuses a regression in another. This pattern comes from the
+[Rust Porting Playbook](https://github.com/jlevy/rust-porting-playbook)'s
+[flowmark case study](https://github.com/jlevy/rust-porting-playbook/tree/main/case-studies/flowmark),
+where the finished port was byte-identical to Python *except* for a documented
+set of parser differences.
+
+## Using it in your repo
+
+**As a template** — clone, delete `demo/`, point `src/main.rs` at your own
+registry, and replace the fixtures.
+
+**As a library** — depend on the crates and keep your own binary:
+
+```toml
+[dependencies]
+portkit-core = "0.1"
+portkit-cli  = "0.1"   # optional: the whole command surface
+portkit-mcp  = "0.1"   # optional: MCP server
+```
+
+```rust
+#[tokio::main]
+async fn main() -> std::process::ExitCode {
+    portkit_cli::run(my_registry()).await
+}
+```
+
+## Defining a tool
+
+```rust
+use portkit_core::{async_trait, Error, Registry, Result, Tool, ToolSpec};
+use serde_json::{json, Value};
+
+struct Summarize;
+
+#[async_trait]
+impl Tool for Summarize {
+    fn spec(&self) -> ToolSpec {
+        ToolSpec::new(
+            "summarize",
+            "Summarize a document to at most `max_words` words.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "max_words": {"type": "integer", "default": 100}
+                },
+                "required": ["text"]
+            }),
+        )
+    }
+
+    async fn call(&self, input: Value) -> Result<Value> {
+        let text = input.get("text").and_then(Value::as_str)
+            .ok_or_else(|| Error::invalid_input("summarize", "`text` is required"))?;
+        Ok(json!({ "summary": text }))
+    }
+}
+
+pub fn registry() -> Registry {
+    Registry::new().with(Summarize)
+}
+```
+
+The `input_schema` is the model's only guide to calling your tool — MCP clients
+build calls from it. Keep it accurate.
+
+Return `Error::invalid_input` when the caller could fix the problem by changing
+its arguments: the MCP layer tells the model to retry rather than reporting a
+dead end.
+
+## Using it as an MCP server
+
+```bash
+claude mcp add portkit -- /path/to/pk serve
+```
+
+Or in `claude_desktop_config.json`:
+
+```json
+{ "mcpServers": { "portkit": { "command": "/path/to/pk", "args": ["serve"] } } }
+```
+
+> **On a stdio transport, stdout is the protocol channel.** A stray `println!`
+> corrupts the stream and the host drops the connection, with an error that
+> points nowhere near the print. All diagnostics go to stderr; there is a test
+> that runs the server with `RUST_LOG=debug` and fails if anything but JSON
+> reaches stdout.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `pk tools [--json]` | List registered tools |
+| `pk schema <tool>` | Print a tool's JSON Schema |
+| `pk run <tool>` | Call a tool (`--input`, `-a k=v`, `--through-mcp`) |
+| `pk serve` | Serve MCP over stdio |
+| `pk port capture` | Record fixtures from the reference implementation |
+| `pk port replay` | Replay fixtures (`--surface`, `--epsilon`, `--json`) |
+| `pk config` | Show effective configuration |
+| `pk completion <shell>` | Generate a completion script |
+
+## Configuration
+
+Layered: embedded defaults → `--config <file>` → `PK_*` environment.
+Use `__` to descend, e.g. `PK_PARITY__EPSILON=1e-6`. Log verbosity is `RUST_LOG`,
+because the config layer claims the whole `PK_` namespace.
+
+## Layout
+
+| Crate | Role |
+| --- | --- |
+| `core/` | `Tool`, `Registry`, config, errors, the tolerant JSON differ |
+| `mcp/` | MCP server — JSON-RPC 2.0 over stdio |
+| `port/` | Parity harness — capture, replay, reporting |
+| `cli/` | Clap surface; `run(registry)` for downstream binaries |
+| `demo/` | Worked examples. Delete when you fork. |
+
+## Credits
+
+Shape borrowed from [rust-starter](https://github.com/rust-starter/rust-starter).
+The porting methodology — and the accepted-differences pattern in particular —
+draws on [jlevy/rust-porting-playbook](https://github.com/jlevy/rust-porting-playbook).
+
+## License
+
+MIT OR Apache-2.0

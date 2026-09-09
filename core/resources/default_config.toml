@@ -1,0 +1,22 @@
+# Compiled into the binary. Override with `--config <file>` or PK_* env vars,
+# e.g. PK_PARITY__EPSILON=1e-6 or PK_LOG__LEVEL=debug.
+
+[log]
+# tracing-subscriber env-filter directive. Logs always go to stderr, never
+# stdout — stdout is the MCP protocol channel.
+level = "info"
+
+[server]
+# Name advertised to MCP clients during initialize.
+name = "portkit"
+# instructions = "Tools for ..."
+
+[parity]
+# Float tolerance when replaying reference fixtures. Python and Rust round
+# differently at the last place; demanding bit equality flags every port.
+epsilon = 1e-9
+epsilon_rel = 1e-9
+# JSON Pointer prefixes to exclude, e.g. ["/meta/generated_at"].
+ignore_paths = []
+# Compare arrays as multisets rather than sequences.
+unordered_arrays = false
