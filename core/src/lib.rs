@@ -48,6 +48,7 @@ pub mod registry;
 pub mod tool;
 pub mod trace;
 pub mod validate;
+pub mod watch;
 
 pub use async_trait::async_trait;
 
@@ -60,3 +61,4 @@ pub use registry::Registry;
 pub use tool::{Tool, ToolSpec};
 pub use trace::{CallRecord, JsonlRecorder, Outcome, Recorder, Summary};
 pub use validate::InputValidator;
+pub use watch::{inspect, Suggestion, Thresholds};

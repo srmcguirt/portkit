@@ -302,6 +302,54 @@ only the surfaces know what was *delivered* after budgeting — and delivered is
 what context pays for. Off by default; JSONL, one object per line, so a crash
 costs at most one record.
 
+## Watching the agent
+
+portkit's own traces only ever saw portkit's own tools, while the expensive
+calls — `Read`, `Grep`, `Bash` — happen outside it. Hooks close that gap:
+
+```json
+{ "hooks": {
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "pk hook post-tool-use" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "pk hook user-prompt-submit" }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "pk hook session-end" }] }]
+} }
+```
+
+Now the trace bank measures the agent rather than measuring portkit measuring
+itself — and when the data warrants it, says so:
+
+```
+portkit: `/repo/index.ts` has been read 3 times this session (12 KB). If you
+are looking for one definition, `pk run sym` returns just its span instead of
+the whole file.
+```
+
+### Thresholds are measured, not chosen
+
+Each pattern was fitted to 878 local sessions — 59,077 calls, 353 MB:
+
+| pattern | what the data showed |
+| --- | --- |
+| same file read 3+ times | 818 re-reads, 3.1 MB |
+| 5+ files read in a row | `read_file → read_file` **10,013** consecutive pairs |
+| one result over 32 KB | images were 74% of all bytes |
+| same URL fetched twice | 3,214 consecutive `web → web` pairs |
+
+Two reads of a file draw no comment — re-reading after an edit is legitimate.
+Three is searching.
+
+### Restraint is the feature
+
+Suggesting costs tokens too. A 200-byte nudge that saves 2 KB is a good trade
+once; fired on every call it is a loss, and an agent learns to skip advice
+that is always there. So: one suggestion at a time, never the same advice
+twice, and a rate limit between them.
+
+A hook also **never breaks the session it measures** — a malformed payload, an
+unwritable file, an unknown event all exit 0 silently. And only the *target* of
+a call is stored, never its arguments, so file contents never reach the trace
+bank.
+
 ## Using it in your repo
 
 **As a template** — clone, delete `demo/`, point `src/main.rs` at your own

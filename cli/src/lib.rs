@@ -12,6 +12,7 @@
 //! ```
 
 mod commands;
+mod hook;
 mod logging;
 
 use std::path::PathBuf;
@@ -156,6 +157,12 @@ pub enum Command {
         command: PortCommand,
     },
 
+    /// Handle a Claude Code hook event. Reads the payload on stdin.
+    Hook {
+        /// One of: post-tool-use, user-prompt-submit, session-end.
+        event: String,
+    },
+
     /// Summarize recorded tool-call costs.
     Trace {
         /// Directory of JSONL trace files. Defaults to the configured dir.
@@ -278,6 +285,7 @@ impl Command {
             }
             Command::Serve { transport } => commands::serve(registry, config, transport).await,
             Command::Port { command } => commands::port(&registry, config, command).await,
+            Command::Hook { event } => Ok(hook::run(&event, config)),
             Command::Trace { dir, json } => commands::trace(config, dir, json),
             Command::Config => commands::show_config(config),
             Command::Completion { shell } => {

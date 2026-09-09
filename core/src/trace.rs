@@ -40,12 +40,24 @@ pub enum Outcome {
 pub enum Surface {
     Cli,
     Mcp,
+    /// A call portkit did not serve, observed through a Claude Code hook.
+    ///
+    /// These are the expensive ones — `Read`, `Grep`, `Bash` — and without
+    /// them the trace bank only measures portkit measuring itself.
+    Agent,
 }
 
 /// One tool call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallRecord {
     pub tool: String,
+    /// Which session produced it, so per-session patterns can be detected.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub session: String,
+    /// What the call was about — a file path, a URL, a command. Enough to see
+    /// the same target being fetched repeatedly, without storing arguments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
     pub surface: Surface,
     pub outcome: Outcome,
     pub at: String,
@@ -175,6 +187,8 @@ impl Timer {
     ) -> CallRecord {
         CallRecord {
             tool: self.tool,
+            session: String::new(),
+            target: None,
             surface: self.surface,
             outcome,
             at: self.at,
@@ -240,6 +254,8 @@ mod tests {
     fn rec(tool: &str, produced: usize, delivered: usize, outcome: Outcome) -> CallRecord {
         CallRecord {
             tool: tool.into(),
+            session: String::new(),
+            target: None,
             surface: Surface::Mcp,
             outcome,
             at: "2026-09-09T00:00:00Z".into(),
