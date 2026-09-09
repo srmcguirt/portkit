@@ -25,6 +25,24 @@ pub struct Config {
     pub trace: TraceConfig,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub plugins: PluginConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginConfig {
+    /// Manifest of external tools. Declared, never discovered: scanning a
+    /// directory and executing what it finds turns a dropped file into code
+    /// execution.
+    pub manifest: String,
+}
+
+impl Default for PluginConfig {
+    fn default() -> Self {
+        Self {
+            manifest: ".portkit/plugins.toml".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

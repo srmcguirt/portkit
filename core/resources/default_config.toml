@@ -39,3 +39,7 @@ dir = ".portkit/traces"
 # Committed snapshot files, loaded at startup so `tools/list` is already
 # grounded. Capture one with `pks pull`.
 snapshots = []
+
+[plugins]
+# External tools, declared explicitly. Absent file = no plugins, no error.
+manifest = ".portkit/plugins.toml"

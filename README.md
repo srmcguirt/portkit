@@ -169,6 +169,57 @@ whole value, so the parity harness compares what the tool actually produced.
 Trimming before the harness saw it would make fixtures agree with a summary
 rather than with the port.
 
+## Plugins
+
+Any executable that can describe itself is a tool. Declare it:
+
+```toml
+# .portkit/plugins.toml
+[[plugin]]
+command = "python3"
+args = ["tools/wordcount.py"]
+timeout_secs = 30
+```
+
+Implement two things — a `--portkit-spec` flag, and one JSON request on stdin:
+
+```python
+if "--portkit-spec" in sys.argv:
+    json.dump({"name": "wordcount", "description": "...",
+               "input_schema": {...}}, sys.stdout); sys.exit(0)
+
+words = json.load(sys.stdin)["input"]["text"].split()
+json.dump({"words": len(words), "unique": len(set(words))}, sys.stdout)
+```
+
+It now appears in `pk tools`, answers over CLI and MCP, and **inherits argument
+validation, output budgets, provenance and tracing it never implemented**.
+
+### The contract is the porting on-ramp
+
+That stdin/stdout envelope is the one `pk port capture` already speaks to a
+reference implementation, so a plugin is also a fixture source:
+
+```text
+register as plugin  →  pk port capture  →  port to Rust  →  pk port replay  →  swap
+   works today          records what        write the         proves they      same tool,
+                        it does             native tool       agree            now native
+```
+
+Nothing has to be rewritten before it becomes useful.
+
+### Costs and constraints
+
+A subprocess call is **~40 ms** against **~0.05 ms** for a native tool — spawn
+cost, and the reason to port the hot ones eventually. Every entry has a
+timeout, because a plugin that hangs would otherwise hang the agent waiting on
+it. A plugin that fails to register is reported and skipped rather than taking
+the server down.
+
+**Discovery is a manifest, never a PATH scan.** Scanning a directory and
+executing what it finds turns a dropped file into code execution, and the
+convenience is not worth it.
+
 ## Schema tools
 
 Point the config at a captured snapshot and `pk serve` exposes the schema
