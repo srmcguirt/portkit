@@ -1520,6 +1520,7 @@ dependencies = [
  "async-trait",
  "moka",
  "portkit-core",
+ "portkit-mcp",
  "serde",
  "serde_json",
  "sqlx",

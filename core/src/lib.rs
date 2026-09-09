@@ -42,6 +42,7 @@
 pub mod config;
 pub mod diff;
 pub mod error;
+pub mod refs;
 pub mod registry;
 pub mod tool;
 pub mod validate;
@@ -51,6 +52,7 @@ pub use async_trait::async_trait;
 pub use config::Config;
 pub use diff::{diff, matches, DiffKind, DiffOptions, Difference};
 pub use error::{Error, Result};
+pub use refs::{RefOutcome, RefResolver, SchemaRef};
 pub use registry::Registry;
 pub use tool::{Tool, ToolSpec};
 pub use validate::InputValidator;

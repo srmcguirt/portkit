@@ -66,10 +66,57 @@ Copied rather than depended on because magna is a `publish = false` workspace
 in another repo. Its declared `magna-types` dependency was unused and dropped.
 Re-sync by diffing that path and updating the commit in `src/pg/mod.rs`.
 
+## Checked before dispatch, not after
+
+A tool annotates the arguments that are references:
+
+```json
+"table":   { "type": "string", "x-schema-ref": "fellwork#table" },
+"columns": { "type": "array",
+             "items": { "x-schema-ref": "fellwork#column(table)" } }
+```
+
+`fellwork#column(table)` is a dependent reference: the column is checked
+against whatever the sibling `table` argument holds.
+
+Wire a resolver into the registry and every surface gets the check:
+
+```rust
+let registry = Registry::new()
+    .with(Query)
+    .with_resolver(Arc::new(SchemaRegistry::new().with(snapshot)));
+```
+
+```
+registry.call("query", json!({"table": "source.tokens",
+                              "columns": ["surface_from"]}))
+→ invalid input for `query`: /columns/0: `surface_from` is not a known
+  column in `fellwork` (source.tokens); did you mean `surface_form`?
+  [fellwork @ PostgresCatalog, captured 2026-09-09T17:42:14]
+```
+
+**The tool does not run.** `tests/gate.rs` asserts that with a call counter,
+on the CLI path and the MCP path both — a gate that only guards one surface is
+not a gate, since agents call through MCP.
+
+Three deliberate refusals, each because a false pass is worse than a decline:
+
+- an **unloaded source** reports "no snapshot loaded", never "unknown name" —
+  otherwise an unconfigured source is indistinguishable from hallucination
+- a **column reference whose parent argument is missing** declines rather than
+  searching every table for the name
+- a **malformed annotation** is reported, not skipped, so an author never
+  believes in a check that isn't running
+
+With no resolver wired, reference checking is skipped entirely, so downstream
+repos without a snapshot still work.
+
 ## Status
 
-Prototype. Working: Postgres capture, snapshot + fingerprint, table/column
-resolution with suggestions, offline tests against committed real DDL.
+Working: Postgres capture, snapshot + fingerprint, table/column resolution with
+suggestions, `x-schema-ref` gating on both surfaces, offline tests against
+committed real DDL.
 
-Not built yet: `x-schema-ref` wiring so the registry checks arguments before
-dispatch; drift detection against live; OpenAPI/GraphQL/TypeScript sources.
+Not built yet: drift detection against a live database;
+OpenAPI/GraphQL/TypeScript sources; enum and function references are resolved
+but untested against real data.

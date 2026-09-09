@@ -18,6 +18,9 @@ use crate::error::Error;
 pub struct InputValidator {
     tool: String,
     validator: Option<Validator>,
+    /// Kept alongside the compiled form: schema-reference checking walks the
+    /// raw document, which `jsonschema` does not expose once compiled.
+    schema: Value,
 }
 
 impl InputValidator {
@@ -41,7 +44,20 @@ impl InputValidator {
         Self {
             tool: tool.to_string(),
             validator,
+            schema: schema.clone(),
         }
+    }
+
+    /// The raw schema, for schema-reference checking.
+    ///
+    /// `jsonschema` does not expose the source document once compiled, and the
+    /// reference walk needs it.
+    pub fn schema(&self) -> &Value {
+        &self.schema
+    }
+
+    pub fn tool(&self) -> &str {
+        &self.tool
     }
 
     /// Check an argument object, returning an error the model can act on.

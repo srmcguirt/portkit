@@ -27,3 +27,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 [[bin]]
 name = "pks"
 path = "src/main.rs"
+
+[dev-dependencies.portkit-mcp]
+workspace = true

@@ -13,9 +13,11 @@
 
 pub mod pg;
 pub mod resolve;
+pub mod resolver;
 pub mod snapshot;
 
 pub use resolve::{resolve_column, resolve_table, Resolution, Suggestion};
+pub use resolver::SchemaRegistry;
 pub use snapshot::{Column, Provenance, Snapshot, SourceKind, Table};
 
 use std::collections::BTreeMap;
