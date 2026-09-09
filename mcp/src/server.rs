@@ -9,6 +9,7 @@ use serde_json::{json, Value};
 use tracing::{debug, warn};
 
 use portkit_core::budget::{self, Budget};
+use portkit_core::trace::{NullRecorder, Outcome, Recorder, Surface, Timer};
 use portkit_core::{Error, Registry};
 
 use crate::protocol::*;
@@ -24,6 +25,9 @@ pub struct McpServer {
     /// a tighter one. An agent cannot ask for less after the fact — by then
     /// the tokens are already spent.
     budget: Budget,
+    /// Records what each call actually cost in context. Defaults to
+    /// discarding, so tracing is opt-in.
+    recorder: Arc<dyn Recorder>,
 }
 
 impl McpServer {
@@ -32,7 +36,15 @@ impl McpServer {
             registry: Arc::new(registry),
             info,
             budget: Budget::default(),
+            recorder: Arc::new(NullRecorder),
         }
+    }
+
+    /// Record every call's cost. See [`portkit_core::trace`].
+    #[must_use]
+    pub fn with_recorder(mut self, recorder: Arc<dyn Recorder>) -> Self {
+        self.recorder = recorder;
+        self
     }
 
     /// Override the default output budget for this server.
@@ -240,11 +252,38 @@ impl McpServer {
 
         // Everything past here is the tool's own business. Failures ride back
         // in-band as isError so the model can read them and try again.
+        let timer = Timer::start(
+            name,
+            Surface::Mcp,
+            &arguments,
+            portkit_core::trace::now_rfc3339(),
+        );
         let result = match self.registry.call(name, arguments).await {
-            Ok(value) => ToolCallResult::ok(self.budgeted(name, value)),
+            Ok(value) => {
+                let produced = measure(&value);
+                let trimmed = self.budgeted(name, value);
+                let delivered = measure(&trimmed);
+                self.recorder.record(timer.finish(
+                    Outcome::Ok,
+                    produced,
+                    delivered,
+                    usize::from(delivered < produced),
+                ));
+                ToolCallResult::ok(trimmed)
+            }
             Err(err) => {
                 debug!(tool = %name, %err, "tool call failed");
-                ToolCallResult::failed(describe(&err))
+                // A rejection is the gate working; a failure is the tool
+                // breaking. Recording them the same way would hide both.
+                let outcome = if err.is_caller_fault() {
+                    Outcome::Rejected
+                } else {
+                    Outcome::Failed
+                };
+                let message = describe(&err);
+                self.recorder
+                    .record(timer.finish(outcome, 0, message.len(), 0));
+                ToolCallResult::failed(message)
             }
         };
 
@@ -273,6 +312,10 @@ fn describe(err: &Error) -> String {
     } else {
         err.to_string()
     }
+}
+
+fn measure(v: &serde_json::Value) -> usize {
+    serde_json::to_vec(v).map(|b| b.len()).unwrap_or(0)
 }
 
 struct RpcError {

@@ -169,6 +169,41 @@ whole value, so the parity harness compares what the tool actually produced.
 Trimming before the harness saw it would make fixtures agree with a summary
 rather than with the port.
 
+## Measuring what tools cost
+
+Claude Code exports OpenTelemetry — counts, latencies, token totals per
+session. What it does not export is **bytes returned per tool call**, and that
+is the number that decides whether a tool earns its place. Finding it otherwise
+means parsing session transcripts after the fact.
+
+Turn tracing on and portkit records it as it happens:
+
+```toml
+[trace]
+enabled = true
+dir = ".portkit/traces"
+```
+
+```
+$ pk trace
+  TOOL             CALLS   DELIVERED       SAVED     AVG ms  REJECTED
+  ------------------------------------------------------------------
+  chunk_text           3     30.5 KB    120.3 KB       3.06         1
+  word_frequency       2       327 B         0 B       0.05         0
+
+  5 calls · 30.9 KB delivered · 120.3 KB kept out of context · 1 rejected
+```
+
+`SAVED` is what the budget kept out of context; `REJECTED` counts calls the
+schema gate stopped before the tool ran. A gate that fires often is working; a
+gate that never fires may be misconfigured, and collapsing rejections into
+failures would hide both.
+
+Recorded at the CLI and MCP surfaces rather than in `Registry::call`, because
+only the surfaces know what was *delivered* after budgeting — and delivered is
+what context pays for. Off by default; JSONL, one object per line, so a crash
+costs at most one record.
+
 ## Using it in your repo
 
 **As a template** — clone, delete `demo/`, point `src/main.rs` at your own

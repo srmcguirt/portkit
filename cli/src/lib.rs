@@ -140,6 +140,17 @@ pub enum Command {
         command: PortCommand,
     },
 
+    /// Summarize recorded tool-call costs.
+    Trace {
+        /// Directory of JSONL trace files. Defaults to the configured dir.
+        #[arg(short, long, value_name = "DIR")]
+        dir: Option<PathBuf>,
+
+        /// Emit JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show the effective configuration after all layers are applied.
     Config,
 
@@ -251,6 +262,7 @@ impl Command {
             }
             Command::Serve { transport } => commands::serve(registry, config, transport).await,
             Command::Port { command } => commands::port(&registry, config, command).await,
+            Command::Trace { dir, json } => commands::trace(config, dir, json),
             Command::Config => commands::show_config(config),
             Command::Completion { shell } => {
                 commands::completion(shell);

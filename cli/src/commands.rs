@@ -1,14 +1,21 @@
 //! Command implementations.
 
+use std::collections::BTreeMap;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use clap::CommandFactory;
 use clap_complete::generate;
 use serde_json::{Map, Value};
 
 use portkit_core::budget::{self, Budget};
+// Aliased: `portkit_port::Surface` names a replay surface, this one names
+// where a call came from.
+use portkit_core::trace::{
+    self, CallRecord, JsonlRecorder, Outcome, Recorder, Summary, Surface as CallSurface, Timer,
+};
 use portkit_core::{Config, Error, Registry, Result};
 use portkit_mcp::{McpServer, ServerInfo};
 use portkit_port::{capture, replay, CaptureOptions, ReplayOptions, ReplayReport, Surface};
@@ -90,8 +97,35 @@ pub async fn run_tool(registry: &Registry, config: &Config, run: RunArgs<'_>) ->
             .structured_content
             .ok_or_else(|| Error::tool_failed(tool, "MCP result carried no structuredContent"))?
     } else {
-        let raw = registry.call(tool, arguments).await?;
-        apply_budget(registry, config, tool, raw, run.budget, run.full)
+        let rec = recorder(config);
+        let timer = Timer::start(tool, CallSurface::Cli, &arguments, trace::now_rfc3339());
+        match registry.call(tool, arguments).await {
+            Ok(raw) => {
+                let produced = measure(&raw);
+                let out = apply_budget(registry, config, tool, raw, run.budget, run.full);
+                let delivered = measure(&out);
+                if let Some(r) = &rec {
+                    r.record(timer.finish(
+                        Outcome::Ok,
+                        produced,
+                        delivered,
+                        usize::from(delivered < produced),
+                    ));
+                }
+                out
+            }
+            Err(err) => {
+                if let Some(r) = &rec {
+                    let outcome = if err.is_caller_fault() {
+                        Outcome::Rejected
+                    } else {
+                        Outcome::Failed
+                    };
+                    r.record(timer.finish(outcome, 0, err.to_string().len(), 0));
+                }
+                return Err(err);
+            }
+        }
     };
 
     let rendered = if run.compact {
@@ -138,7 +172,10 @@ fn apply_budget(
 pub async fn serve(registry: Registry, config: &Config, transport: Transport) -> Result<ExitCode> {
     match transport {
         Transport::Stdio => {
-            let server = McpServer::new(registry, server_info(config));
+            let mut server = McpServer::new(registry, server_info(config));
+            if let Some(recorder) = recorder(config) {
+                server = server.with_recorder(recorder);
+            }
             portkit_mcp::serve_stdio(server).await?;
             Ok(ExitCode::SUCCESS)
         }
@@ -221,6 +258,111 @@ pub async fn port(registry: &Registry, config: &Config, command: PortCommand) ->
 
             Ok(exit_code(reports.iter().all(|(_, r)| r.is_success())))
         }
+    }
+}
+
+fn measure(v: &serde_json::Value) -> usize {
+    serde_json::to_vec(v).map(|b| b.len()).unwrap_or(0)
+}
+
+fn today() -> String {
+    let d = time::OffsetDateTime::now_utc().date();
+    format!("{:04}-{:02}-{:02}", d.year(), u8::from(d.month()), d.day())
+}
+
+/// A recorder when tracing is enabled, otherwise nothing.
+///
+/// A recorder that cannot open its file returns `None` rather than failing the
+/// command: telemetry is never worth breaking the work it measures.
+fn recorder(config: &Config) -> Option<Arc<dyn Recorder>> {
+    if !config.trace.enabled {
+        return None;
+    }
+    let path = PathBuf::from(&config.trace.dir).join(format!("{}.jsonl", today()));
+    match JsonlRecorder::create(&path) {
+        Ok(r) => Some(Arc::new(r)),
+        Err(err) => {
+            eprintln!(
+                "warning: tracing disabled — could not open {}: {err}",
+                path.display()
+            );
+            None
+        }
+    }
+}
+
+pub fn trace(config: &Config, dir: Option<PathBuf>, json: bool) -> Result<ExitCode> {
+    let dir = dir.unwrap_or_else(|| PathBuf::from(&config.trace.dir));
+    if !dir.exists() {
+        println!(
+            "no traces at {} (set [trace] enabled = true)",
+            dir.display()
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let mut records: Vec<CallRecord> = Vec::new();
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)?
+        .filter_map(std::result::Result::ok)
+        .collect();
+    entries.sort_by_key(std::fs::DirEntry::path);
+    for e in entries {
+        let p = e.path();
+        if p.extension().is_some_and(|x| x == "jsonl") {
+            records.extend(trace::read_jsonl(&p)?);
+        }
+    }
+
+    if records.is_empty() {
+        println!("no calls recorded in {}", dir.display());
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    // Per tool, so the biggest offender is obvious at a glance.
+    let mut by_tool: BTreeMap<String, Summary> = BTreeMap::new();
+    let mut overall = Summary::default();
+    for r in &records {
+        by_tool.entry(r.tool.clone()).or_default().add(r);
+        overall.add(r);
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&by_tool)?);
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    let width = by_tool.keys().map(String::len).max().unwrap_or(4).max(4);
+    println!(
+        "  {:<width$}  {:>6}  {:>10}  {:>10}  {:>9}  {:>8}",
+        "TOOL", "CALLS", "DELIVERED", "SAVED", "AVG ms", "REJECTED"
+    );
+    println!("  {}", "-".repeat(width + 52));
+    for (tool, s) in &by_tool {
+        println!(
+            "  {:<width$}  {:>6}  {:>10}  {:>10}  {:>9.2}  {:>8}",
+            tool,
+            s.calls,
+            human(s.delivered_bytes),
+            human(s.saved_bytes()),
+            s.total_ms / s.calls.max(1) as f64,
+            s.rejected
+        );
+    }
+    println!(
+        "\n  {} calls · {} delivered · {} kept out of context · {} rejected before dispatch",
+        overall.calls,
+        human(overall.delivered_bytes),
+        human(overall.saved_bytes()),
+        overall.rejected
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
+fn human(bytes: usize) -> String {
+    match bytes {
+        b if b >= 1_000_000 => format!("{:.1} MB", b as f64 / 1e6),
+        b if b >= 1_000 => format!("{:.1} KB", b as f64 / 1e3),
+        b => format!("{b} B"),
     }
 }
 

@@ -21,6 +21,26 @@ pub struct Config {
     pub parity: ParityConfig,
     #[serde(default)]
     pub output: OutputConfig,
+    #[serde(default)]
+    pub trace: TraceConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TraceConfig {
+    /// Record what each tool call cost in context. Off by default: writing a
+    /// file per call is a side effect nobody asked for.
+    pub enabled: bool,
+    /// Directory for daily JSONL files, relative to the working directory.
+    pub dir: String,
+}
+
+impl Default for TraceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            dir: ".portkit/traces".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

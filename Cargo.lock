@@ -1447,6 +1447,7 @@ dependencies = [
  "portkit-port",
  "serde",
  "serde_json",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -1462,6 +1463,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+ "time",
  "tracing",
 ]
 

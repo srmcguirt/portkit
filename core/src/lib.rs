@@ -46,6 +46,7 @@ pub mod error;
 pub mod refs;
 pub mod registry;
 pub mod tool;
+pub mod trace;
 pub mod validate;
 
 pub use async_trait::async_trait;
@@ -57,4 +58,5 @@ pub use error::{Error, Result};
 pub use refs::{RefOutcome, RefResolver, SchemaRef};
 pub use registry::Registry;
 pub use tool::{Tool, ToolSpec};
+pub use trace::{CallRecord, JsonlRecorder, Outcome, Recorder, Summary};
 pub use validate::InputValidator;
