@@ -41,5 +41,8 @@ dir = ".portkit/traces"
 snapshots = []
 
 [plugins]
-# External tools, declared explicitly. Absent file = no plugins, no error.
-manifest = ".portkit/plugins.toml"
+# External tools, declared explicitly — never discovered by scanning, which
+# would turn a dropped file into code execution. Absent file = no plugins.
+# Project is loaded after global, so a repo can override an inherited tool.
+global = "~/.portkit/plugins.toml"
+project = ".portkit/plugins.toml"

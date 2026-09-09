@@ -6,8 +6,25 @@ use serde::{Deserialize, Serialize};
 
 use portkit_core::{Error, Result};
 
-/// Default location, relative to the working directory.
-pub const DEFAULT_PATH: &str = ".portkit/plugins.toml";
+/// Tools available in every repo.
+pub const GLOBAL_PATH: &str = "~/.portkit/plugins.toml";
+
+/// Tools belonging to this repo. Wins on a name collision.
+pub const PROJECT_PATH: &str = ".portkit/plugins.toml";
+
+/// Expand a leading `~/`.
+///
+/// Only the leading form: `~user` needs passwd lookups, and a path containing
+/// a literal tilde elsewhere is not a home reference.
+pub fn expand_home(path: &str) -> std::path::PathBuf {
+    match path.strip_prefix("~/") {
+        Some(rest) => match std::env::var_os("HOME") {
+            Some(home) => std::path::PathBuf::from(home).join(rest),
+            None => std::path::PathBuf::from(path),
+        },
+        None => std::path::PathBuf::from(path),
+    }
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Manifest {
@@ -61,6 +78,24 @@ mod tests {
 
     fn parse(s: &str) -> Manifest {
         toml::from_str(s).unwrap()
+    }
+
+    #[test]
+    fn a_leading_tilde_expands_to_home() {
+        let home = std::env::var("HOME").unwrap();
+        assert_eq!(
+            expand_home("~/.portkit/plugins.toml"),
+            std::path::PathBuf::from(&home).join(".portkit/plugins.toml")
+        );
+    }
+
+    #[test]
+    fn a_tilde_elsewhere_is_left_alone() {
+        // `a~b` is a filename, not a home reference.
+        assert_eq!(
+            expand_home("/tmp/a~b"),
+            std::path::PathBuf::from("/tmp/a~b")
+        );
     }
 
     #[test]

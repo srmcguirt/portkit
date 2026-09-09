@@ -18,21 +18,27 @@ async fn main() -> ExitCode {
 /// Blocking inside the builder because registration happens before the async
 /// command runs; discovery is a handful of short-lived subprocesses.
 fn load_plugins(registry: &mut Registry, config: &Config) {
-    let manifest = std::path::Path::new(&config.plugins.manifest);
-    if !manifest.exists() {
-        return; // no manifest is the normal case, not an error
+    let layers: Vec<_> = config
+        .plugins
+        .layers()
+        .iter()
+        .map(|p| portkit_plugin::expand_home(p))
+        .collect();
+    if !layers.iter().any(|p| p.exists()) {
+        return; // no manifests is the normal case, not an error
     }
-    let problems = tokio::task::block_in_place(|| {
+
+    let report = tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current()
-            .block_on(portkit_plugin::register_from(registry, manifest))
+            .block_on(portkit_plugin::register_layers(registry, &layers))
     });
-    match problems {
-        Ok(problems) => {
-            for p in problems {
-                eprintln!("warning: plugin unavailable — {p}");
-            }
-        }
-        Err(err) => eprintln!("warning: could not read {}: {err}", manifest.display()),
+
+    for p in &report.problems {
+        eprintln!("warning: plugin unavailable — {p}");
+    }
+    for (name, shadowed) in &report.shadowed {
+        // A tool being silently replaced is worse than one that failed loudly.
+        eprintln!("note: `{name}` overrides the one declared in {shadowed}");
     }
 }
 

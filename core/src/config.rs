@@ -31,17 +31,29 @@ pub struct Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
-    /// Manifest of external tools. Declared, never discovered: scanning a
-    /// directory and executing what it finds turns a dropped file into code
-    /// execution.
-    pub manifest: String,
+    /// Tools available in every repo. `~/` expands to the home directory.
+    pub global: String,
+    /// Tools belonging to this repo. Loaded after `global`, so a repo can
+    /// override an inherited tool without editing anyone else's manifest.
+    pub project: String,
 }
 
 impl Default for PluginConfig {
     fn default() -> Self {
         Self {
-            manifest: ".portkit/plugins.toml".into(),
+            global: "~/.portkit/plugins.toml".into(),
+            project: ".portkit/plugins.toml".into(),
         }
+    }
+}
+
+impl PluginConfig {
+    /// Manifests in precedence order, least specific first.
+    ///
+    /// Declared, never discovered: scanning a directory and executing what it
+    /// finds turns a dropped file into code execution.
+    pub fn layers(&self) -> Vec<String> {
+        vec![self.global.clone(), self.project.clone()]
     }
 }
 

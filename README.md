@@ -220,6 +220,18 @@ the server down.
 executing what it finds turns a dropped file into code execution, and the
 convenience is not worth it.
 
+### Global and project layers
+
+```
+~/.portkit/plugins.toml    tools available in every repo
+.portkit/plugins.toml      tools belonging to this repo — wins on a name collision
+```
+
+A tool used across repos is declared once. A repo can override one it inherits
+without editing anyone else's manifest, and the override is reported rather
+than silent — a tool quietly replaced is worse than one that failed loudly.
+Missing manifests are skipped; having no plugins is the normal case.
+
 ## Schema tools
 
 Point the config at a captured snapshot and `pk serve` exposes the schema
