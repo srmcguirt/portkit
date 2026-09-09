@@ -53,9 +53,19 @@ fn best_matches<'a>(name: &str, candidates: impl Iterator<Item = &'a str>) -> Ve
     let mut scored: Vec<Suggestion> = candidates
         .filter_map(|c| {
             let d = edit_distance(&lower, &c.to_lowercase());
-            // A containment match is usually the real intent even when the
-            // edit distance is large — `tokens` vs `source.tokens`.
-            let contained = c.to_lowercase().contains(&lower) || lower.contains(&c.to_lowercase());
+            // A containment match is often the real intent even at a large
+            // edit distance — `tokens` vs `source.tokens`. But it has to be
+            // substantial: `id` is contained in half the columns in any
+            // schema, and suggesting it for `user_id` is noise the model
+            // will act on.
+            let other = c.to_lowercase();
+            let (short, long) = if lower.len() <= other.len() {
+                (lower.as_str(), other.as_str())
+            } else {
+                (other.as_str(), lower.as_str())
+            };
+            let contained =
+                short.len() >= 4 && short.len() * 2 >= long.len() && long.contains(short);
             (d <= limit || contained).then(|| Suggestion {
                 name: c.to_string(),
                 distance: d,
@@ -255,6 +265,35 @@ mod tests {
                 "five bad guesses are worse than none: {suggestions:?}"
             ),
             other => panic!("expected rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_short_substring_is_not_offered_as_a_suggestion() {
+        // Found against the real fellwork schema: `user_id` was answered with
+        // "did you mean `id`?" because `id` is contained in it. `id` is
+        // contained in half the columns of any schema, and the model acts on
+        // whatever it is told.
+        let r = resolve_column(&snap(), "usr.accounts", "user_id");
+        match r {
+            Resolution::Unknown { suggestions, .. } => assert!(
+                !suggestions.iter().any(|s| s.name == "id"),
+                "`id` is noise here: {suggestions:?}"
+            ),
+            other => panic!("expected rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_substantial_containment_match_is_still_offered() {
+        // The rule must not become so strict that it loses real intent.
+        let r = resolve_table(&snap(), "tokens_extra");
+        match r {
+            Resolution::Unknown { suggestions, .. } => assert!(
+                suggestions.iter().any(|s| s.name.contains("tokens")),
+                "expected a tokens suggestion: {suggestions:?}"
+            ),
+            Resolution::Known { .. } => panic!("should not resolve"),
         }
     }
 
