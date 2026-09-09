@@ -167,6 +167,103 @@ fn replay_exits_non_zero_when_a_fixture_does_not_match() {
         .stdout(predicate::str::contains("/total"));
 }
 
+/// A text long enough that chunking it blows any sensible budget.
+fn oversized_text() -> String {
+    "the quick brown fox jumps over the lazy dog. ".repeat(400)
+}
+
+#[test]
+fn oversized_output_is_trimmed_to_budget() {
+    let out = pk()
+        .args(["run", "chunk_text", "-a"])
+        .arg(format!("text={}", oversized_text()))
+        .args([
+            "-a",
+            "size=20",
+            "-a",
+            "overlap=2",
+            "--budget",
+            "4000",
+            "--compact",
+        ])
+        .assert()
+        .success();
+    let bytes = out.get_output().stdout.len();
+    // +1 for the trailing newline from println!.
+    assert!(bytes <= 4_001, "budget 4000 exceeded: {bytes} bytes");
+}
+
+#[test]
+fn a_trimmed_result_says_how_to_get_the_rest() {
+    // "Truncated" with no next step sends the agent back to reading it all.
+    let out = pk()
+        .args(["run", "chunk_text", "-a"])
+        .arg(format!("text={}", oversized_text()))
+        .args(["-a", "size=20", "-a", "overlap=2", "--budget", "4000"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    let note = &v["_elided"][0];
+    assert_eq!(note["path"], "/chunks");
+    assert!(note["total"].as_u64().unwrap() > note["kept"].as_u64().unwrap());
+    assert!(
+        note["retry"].as_str().unwrap().contains("size"),
+        "the hint should come from the tool's schema: {note}"
+    );
+}
+
+#[test]
+fn trimming_keeps_the_summary_fields_beside_the_trimmed_array() {
+    let out = pk()
+        .args(["run", "chunk_text", "-a"])
+        .arg(format!("text={}", oversized_text()))
+        .args(["-a", "size=20", "-a", "overlap=2", "--budget", "2000"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    // The count is the part most worth keeping when the list is cut.
+    assert_eq!(v["count"], 1000);
+}
+
+#[test]
+fn full_bypasses_the_budget() {
+    let out = pk()
+        .args(["run", "chunk_text", "-a"])
+        .arg(format!("text={}", oversized_text()))
+        .args(["-a", "size=20", "-a", "overlap=2", "--full", "--compact"])
+        .assert()
+        .success();
+    assert!(out.get_output().stdout.len() > 60_000);
+}
+
+#[test]
+fn budget_and_full_are_mutually_exclusive() {
+    pk().args([
+        "run",
+        "chunk_text",
+        "-a",
+        "text=abc",
+        "--budget",
+        "100",
+        "--full",
+    ])
+    .assert()
+    .failure();
+}
+
+#[test]
+fn a_small_result_is_not_annotated() {
+    let out = pk()
+        .args(["run", "word_frequency", "-a", "text=a b a"])
+        .assert()
+        .success();
+    let v: serde_json::Value = serde_json::from_slice(&out.get_output().stdout).unwrap();
+    assert!(
+        v.get("_elided").is_none(),
+        "nothing was trimmed, so say nothing"
+    );
+}
+
 #[test]
 fn completion_scripts_generate() {
     pk().args(["completion", "zsh"])

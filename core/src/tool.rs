@@ -22,6 +22,11 @@ pub struct ToolSpec {
     /// documents intent and gives the parity harness a shape to check.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output_schema: Option<Value>,
+    /// How much context this tool's output may occupy, applied at the CLI and
+    /// MCP boundaries. A tool that can return an unbounded list should set
+    /// this rather than trusting callers to ask for less.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub budget: Option<crate::budget::Budget>,
 }
 
 impl ToolSpec {
@@ -35,11 +40,19 @@ impl ToolSpec {
             description: description.into(),
             input_schema,
             output_schema: None,
+            budget: None,
         }
     }
 
     pub fn with_output_schema(mut self, schema: Value) -> Self {
         self.output_schema = Some(schema);
+        self
+    }
+
+    /// Cap this tool's output. Prefer declaring it here over hoping callers
+    /// pass `--budget`: the tool author knows which results can run away.
+    pub fn with_budget(mut self, budget: crate::budget::Budget) -> Self {
+        self.budget = Some(budget);
         self
     }
 }

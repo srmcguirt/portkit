@@ -116,6 +116,15 @@ pub enum Command {
         /// Route the call through the MCP envelope, as an agent would.
         #[arg(long)]
         through_mcp: bool,
+
+        /// Cap output at N bytes of JSON (~4 bytes/token). Overrides the
+        /// tool's own budget and the config default.
+        #[arg(long, value_name = "BYTES")]
+        budget: Option<usize>,
+
+        /// Print the whole result, however large.
+        #[arg(long, conflicts_with = "budget")]
+        full: bool,
     },
 
     /// Serve the tools over MCP on stdio.
@@ -222,9 +231,23 @@ impl Command {
                 args,
                 compact,
                 through_mcp,
+                budget,
+                full,
             } => {
-                commands::run_tool(&registry, config, &tool, input, &args, compact, through_mcp)
-                    .await
+                commands::run_tool(
+                    &registry,
+                    config,
+                    commands::RunArgs {
+                        tool: &tool,
+                        input,
+                        args: &args,
+                        compact,
+                        through_mcp,
+                        budget,
+                        full,
+                    },
+                )
+                .await
             }
             Command::Serve { transport } => commands::serve(registry, config, transport).await,
             Command::Port { command } => commands::port(&registry, config, command).await,

@@ -20,3 +20,11 @@ epsilon_rel = 1e-9
 ignore_paths = []
 # Compare arrays as multisets rather than sequences.
 unordered_arrays = false
+
+[output]
+# Default cap on tool output, in bytes of serialized JSON (~4 bytes/token).
+# Applied at the CLI and MCP boundaries, not inside Registry::call — the
+# parity harness must compare what a tool actually produced.
+max_bytes = 16384
+# Never trim an array below this; an empty list says less than three examples.
+min_items = 3

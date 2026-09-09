@@ -39,6 +39,7 @@
 //! # fn tokio_test_shim<F: std::future::Future>(f: F) { let _ = f; }
 //! ```
 
+pub mod budget;
 pub mod config;
 pub mod diff;
 pub mod error;
@@ -49,6 +50,7 @@ pub mod validate;
 
 pub use async_trait::async_trait;
 
+pub use budget::{Budget, Budgeted, Elision};
 pub use config::Config;
 pub use diff::{diff, matches, DiffKind, DiffOptions, Difference};
 pub use error::{Error, Result};

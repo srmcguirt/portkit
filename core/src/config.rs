@@ -19,6 +19,37 @@ pub struct Config {
     pub server: ServerConfig,
     #[serde(default)]
     pub parity: ParityConfig,
+    #[serde(default)]
+    pub output: OutputConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputConfig {
+    /// Default cap on tool output, in bytes of serialized JSON. Roughly four
+    /// bytes per token. A tool may declare a tighter budget of its own.
+    pub max_bytes: usize,
+    /// Smallest array left after trimming; keeps the shape of an answer even
+    /// when most of it is dropped.
+    pub min_items: usize,
+}
+
+impl Default for OutputConfig {
+    fn default() -> Self {
+        let d = crate::budget::Budget::default();
+        Self {
+            max_bytes: d.max_bytes,
+            min_items: d.min_items,
+        }
+    }
+}
+
+impl From<&OutputConfig> for crate::budget::Budget {
+    fn from(c: &OutputConfig) -> Self {
+        crate::budget::Budget {
+            max_bytes: c.max_bytes,
+            min_items: c.min_items,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +171,10 @@ impl Config {
 
     pub fn diff_options(&self) -> DiffOptions {
         DiffOptions::from(&self.parity)
+    }
+
+    pub fn budget(&self) -> crate::budget::Budget {
+        crate::budget::Budget::from(&self.output)
     }
 }
 

@@ -8,6 +8,7 @@ use clap::CommandFactory;
 use clap_complete::generate;
 use serde_json::{Map, Value};
 
+use portkit_core::budget::{self, Budget};
 use portkit_core::{Config, Error, Registry, Result};
 use portkit_mcp::{McpServer, ServerInfo};
 use portkit_port::{capture, replay, CaptureOptions, ReplayOptions, ReplayReport, Surface};
@@ -54,23 +55,26 @@ pub fn schema(registry: &Registry, tool: &str) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run_tool(
-    registry: &Registry,
-    config: &Config,
-    tool: &str,
-    input: Option<PathBuf>,
-    args: &[String],
-    compact: bool,
-    through_mcp: bool,
-) -> Result<ExitCode> {
+/// Arguments for `pk run`, grouped so the signature stays readable.
+pub struct RunArgs<'a> {
+    pub tool: &'a str,
+    pub input: Option<PathBuf>,
+    pub args: &'a [String],
+    pub compact: bool,
+    pub through_mcp: bool,
+    pub budget: Option<usize>,
+    pub full: bool,
+}
+
+pub async fn run_tool(registry: &Registry, config: &Config, run: RunArgs<'_>) -> Result<ExitCode> {
+    let tool = run.tool;
     if registry.get(tool).is_none() {
         return Err(unknown_tool(registry, tool));
     }
 
-    let arguments = build_arguments(input, args, tool)?;
+    let arguments = build_arguments(run.input, run.args, tool)?;
 
-    let value = if through_mcp {
+    let value = if run.through_mcp {
         let server = McpServer::new(registry.clone(), server_info(config));
         let result = server.call_tool(tool, arguments).await;
         if result.is_error {
@@ -81,20 +85,54 @@ pub async fn run_tool(
                 .unwrap_or("tool reported an error");
             return Err(Error::tool_failed(tool, message));
         }
+        // The MCP surface already applied its budget.
         result
             .structured_content
             .ok_or_else(|| Error::tool_failed(tool, "MCP result carried no structuredContent"))?
     } else {
-        registry.call(tool, arguments).await?
+        let raw = registry.call(tool, arguments).await?;
+        apply_budget(registry, config, tool, raw, run.budget, run.full)
     };
 
-    let rendered = if compact {
+    let rendered = if run.compact {
         serde_json::to_string(&value)?
     } else {
         serde_json::to_string_pretty(&value)?
     };
     println!("{rendered}");
     Ok(ExitCode::SUCCESS)
+}
+
+/// Precedence: an explicit flag, then the tool's own declaration, then config.
+fn apply_budget(
+    registry: &Registry,
+    config: &Config,
+    tool: &str,
+    value: serde_json::Value,
+    override_bytes: Option<usize>,
+    full: bool,
+) -> serde_json::Value {
+    if full {
+        return value;
+    }
+    let spec = registry.get(tool).map(|t| t.spec());
+    let budget = match override_bytes {
+        Some(bytes) => Budget::bytes(bytes),
+        None => spec
+            .as_ref()
+            .and_then(|s| s.budget)
+            .unwrap_or_else(|| config.budget()),
+    };
+    let schema = spec.as_ref().and_then(|s| s.output_schema.as_ref());
+    let out = budget::apply_annotated(&value, schema, &budget);
+    if out.was_trimmed() {
+        // stderr: stdout is the result, and on `serve` it is the protocol.
+        eprintln!(
+            "note: output trimmed {} -> {} bytes to fit budget",
+            out.original_bytes, out.final_bytes
+        );
+    }
+    out.value
 }
 
 pub async fn serve(registry: Registry, config: &Config, transport: Transport) -> Result<ExitCode> {

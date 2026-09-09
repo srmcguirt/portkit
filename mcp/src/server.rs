@@ -8,6 +8,7 @@ use std::sync::Arc;
 use serde_json::{json, Value};
 use tracing::{debug, warn};
 
+use portkit_core::budget::{self, Budget};
 use portkit_core::{Error, Registry};
 
 use crate::protocol::*;
@@ -19,6 +20,10 @@ use crate::protocol::*;
 pub struct McpServer {
     registry: Arc<Registry>,
     info: ServerInfo,
+    /// Applied to every tool result on the way out, unless the tool declares
+    /// a tighter one. An agent cannot ask for less after the fact — by then
+    /// the tokens are already spent.
+    budget: Budget,
 }
 
 impl McpServer {
@@ -26,7 +31,40 @@ impl McpServer {
         Self {
             registry: Arc::new(registry),
             info,
+            budget: Budget::default(),
         }
+    }
+
+    /// Override the default output budget for this server.
+    #[must_use]
+    pub fn with_budget(mut self, budget: Budget) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// The budget in force for a tool: its own declaration wins over the
+    /// server default, because the author knows which results can run away.
+    fn budget_for(&self, name: &str) -> Budget {
+        self.registry
+            .get(name)
+            .and_then(|t| t.spec().budget)
+            .unwrap_or(self.budget)
+    }
+
+    /// Trim a value to budget and attach an actionable note about what went.
+    fn budgeted(&self, name: &str, value: serde_json::Value) -> serde_json::Value {
+        let spec = self.registry.get(name).map(|t| t.spec());
+        let schema = spec.as_ref().and_then(|s| s.output_schema.as_ref());
+        let out = budget::apply_annotated(&value, schema, &self.budget_for(name));
+        if out.was_trimmed() {
+            debug!(
+                tool = name,
+                from = out.original_bytes,
+                to = out.final_bytes,
+                "trimmed tool output to budget"
+            );
+        }
+        out.value
     }
 
     pub fn registry(&self) -> &Registry {
@@ -203,7 +241,7 @@ impl McpServer {
         // Everything past here is the tool's own business. Failures ride back
         // in-band as isError so the model can read them and try again.
         let result = match self.registry.call(name, arguments).await {
-            Ok(value) => ToolCallResult::ok(value),
+            Ok(value) => ToolCallResult::ok(self.budgeted(name, value)),
             Err(err) => {
                 debug!(tool = %name, %err, "tool call failed");
                 ToolCallResult::failed(describe(&err))
@@ -222,7 +260,7 @@ impl McpServer {
     /// the envelope an agent sees carries the same value the tool returned.
     pub async fn call_tool(&self, name: &str, arguments: Value) -> ToolCallResult {
         match self.registry.call(name, arguments).await {
-            Ok(value) => ToolCallResult::ok(value),
+            Ok(value) => ToolCallResult::ok(self.budgeted(name, value)),
             Err(err) => ToolCallResult::failed(describe(&err)),
         }
     }

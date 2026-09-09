@@ -134,6 +134,41 @@ quietly excuses a regression in another. This pattern comes from the
 where the finished port was byte-identical to Python *except* for a documented
 set of parser differences.
 
+## Bounded output
+
+Tool results are capped at the CLI and MCP boundaries, so one runaway list
+cannot crowd out a conversation. The largest array is trimmed first, summary
+fields beside it are kept, and the note says how to get the rest:
+
+```json
+{
+  "chunks": [ ...230 of them... ],
+  "count": 1000,
+  "_elided": [{
+    "path": "/chunks", "kept": 230, "total": 1000,
+    "retry": "raise `size` or pass a shorter `text` to see fewer, larger chunks"
+  }]
+}
+```
+
+The `retry` text comes from the tool's own output schema:
+
+```json
+"chunks": { "type": "array", "x-page-hint": "call with offset=<n>" }
+```
+
+That half matters. "Truncated 770 items" tells an agent nothing, so it reads
+the whole thing another way and the budget has only moved the cost.
+
+Precedence is `--budget <bytes>` → the tool's `ToolSpec::with_budget` → config
+`[output] max_bytes` (16 KB by default, ~4 bytes per token). `--full` prints
+everything.
+
+**Budget is presentation, not truth.** `Registry::call` always returns the
+whole value, so the parity harness compares what the tool actually produced.
+Trimming before the harness saw it would make fixtures agree with a summary
+rather than with the port.
+
 ## Using it in your repo
 
 **As a template** — clone, delete `demo/`, point `src/main.rs` at your own

@@ -46,6 +46,7 @@ impl Tool for ChunkText {
             "properties": {
                 "chunks": {
                     "type": "array",
+                    "x-page-hint": "raise `size` or pass a shorter `text` to see fewer, larger chunks",
                     "items": {
                         "type": "object",
                         "properties": {
