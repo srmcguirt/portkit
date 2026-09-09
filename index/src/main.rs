@@ -5,8 +5,7 @@
 //!   pkx bench <repo>          the comparison harness vs grep/sed
 //!   pkx serve <repo>          warm loop, to measure steady-state query cost
 
-mod extract;
-mod index;
+use portkit_index::index;
 
 use std::io::{BufRead, Write};
 use std::path::PathBuf;

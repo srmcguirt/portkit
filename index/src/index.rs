@@ -30,6 +30,13 @@ pub struct BuildStats {
 }
 
 impl Index {
+    /// Refuse to index a tree this large.
+    ///
+    /// `sym` is registered against the working directory by default, so it can
+    /// be invoked somewhere nobody meant to index — a home directory, `/`.
+    /// Declining with a number is better than grinding for minutes.
+    pub const MAX_FILES: usize = 20_000;
+
     pub fn build(root: &Path) -> std::io::Result<(Index, BuildStats)> {
         let t0 = Instant::now();
 
@@ -49,6 +56,14 @@ impl Index {
             }
         }
         paths.sort();
+        if paths.len() > Self::MAX_FILES {
+            return Err(std::io::Error::other(format!(
+                "{} has {} source files, over the {} limit — point [index] root at a repository",
+                root.display(),
+                paths.len(),
+                Self::MAX_FILES
+            )));
+        }
         let walk_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         let t1 = Instant::now();

@@ -63,6 +63,7 @@ portkit-cli.workspace = true
 portkit-demo.workspace = true
 portkit-schema = { workspace = true, default-features = false }
 portkit-plugin.workspace = true
+portkit-index.workspace = true
 portkit-core.workspace = true
 tokio.workspace = true
 

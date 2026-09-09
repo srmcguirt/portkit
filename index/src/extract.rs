@@ -1,18 +1,25 @@
-//! Symbol extraction.
+//! Symbol extraction, by parsing rather than scanning lines.
 //!
-//! PROTOTYPE NOTE: this is a line scanner, not a parser. It is deliberately
-//! crude, because the question this prototype answers is about *query* latency
-//! and index size, and extraction quality affects neither — it only affects
-//! index BUILD time, which is amortized. A real implementation would use
-//! tree-sitter (slower to build, far more accurate); swapping it in would not
-//! change the numbers this prototype is measuring.
+//! The first version of this was a line scanner, on the argument that
+//! extraction quality affects index *build* time — which is amortized — and
+//! not the query latency the prototype was measuring. That held, and the
+//! numbers it produced still stand. What it could not do is be correct: a
+//! brace inside a string literal or a doc comment moved the end of every
+//! symbol after it, and `fn` inside a string became a symbol.
+//!
+//! `ast-grep-core` is tree-sitter with the parsing rewritten in Rust. One
+//! dependency covers a dozen languages, so a repo of mixed TypeScript, Rust
+//! and Python indexes through one path.
 
+use ast_grep_core::{AstGrep, Node};
+use ast_grep_language::SupportLang;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Kind {
     Function,
+    Method,
     Struct,
     Enum,
     Trait,
@@ -20,12 +27,15 @@ pub enum Kind {
     Interface,
     TypeAlias,
     Const,
+    Module,
+    Impl,
 }
 
 impl Kind {
     pub fn as_str(&self) -> &'static str {
         match self {
             Kind::Function => "fn",
+            Kind::Method => "method",
             Kind::Struct => "struct",
             Kind::Enum => "enum",
             Kind::Trait => "trait",
@@ -33,6 +43,8 @@ impl Kind {
             Kind::Interface => "interface",
             Kind::TypeAlias => "type",
             Kind::Const => "const",
+            Kind::Module => "mod",
+            Kind::Impl => "impl",
         }
     }
 }
@@ -51,200 +63,170 @@ pub struct Symbol {
     pub signature: String,
 }
 
-/// Language dispatch by extension.
-pub fn language_of(path: &str) -> Option<Lang> {
-    let ext = path.rsplit('.').next()?;
-    Some(match ext {
-        "rs" => Lang::Rust,
-        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => Lang::TypeScript,
-        "py" => Lang::Python,
-        "go" => Lang::Go,
+/// Language for a path, or `None` when nothing here can parse it.
+///
+/// Declining is deliberate. Falling back to a line scanner for an unknown
+/// language would reintroduce exactly the wrongness this module exists to
+/// remove, and a confidently wrong span is worse than no answer.
+pub fn language_of(path: &str) -> Option<SupportLang> {
+    Some(match path.rsplit('.').next()? {
+        "rs" => SupportLang::Rust,
+        "ts" | "mts" | "cts" => SupportLang::TypeScript,
+        "tsx" => SupportLang::Tsx,
+        "js" | "jsx" | "mjs" | "cjs" => SupportLang::JavaScript,
+        "py" => SupportLang::Python,
+        "go" => SupportLang::Go,
+        "java" => SupportLang::Java,
+        "c" | "h" => SupportLang::C,
+        "cpp" | "cc" | "hpp" | "cxx" => SupportLang::Cpp,
+        "rb" => SupportLang::Ruby,
+        "swift" => SupportLang::Swift,
+        "kt" | "kts" => SupportLang::Kotlin,
         _ => return None,
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Lang {
-    Rust,
-    TypeScript,
-    Python,
-    Go,
+/// Node kinds worth indexing, per language, with what to call them.
+fn kind_of(lang: SupportLang, node_kind: &str) -> Option<Kind> {
+    use SupportLang as L;
+    Some(match (lang, node_kind) {
+        (L::Rust, "function_item") => Kind::Function,
+        (L::Rust, "struct_item") => Kind::Struct,
+        (L::Rust, "enum_item") => Kind::Enum,
+        (L::Rust, "trait_item") => Kind::Trait,
+        (L::Rust, "type_item") => Kind::TypeAlias,
+        (L::Rust, "mod_item") => Kind::Module,
+        (L::Rust, "const_item" | "static_item") => Kind::Const,
+        (L::Rust, "impl_item") => Kind::Impl,
+
+        (L::TypeScript | L::Tsx | L::JavaScript, "function_declaration") => Kind::Function,
+        (L::TypeScript | L::Tsx | L::JavaScript, "class_declaration") => Kind::Class,
+        (L::TypeScript | L::Tsx, "interface_declaration") => Kind::Interface,
+        (L::TypeScript | L::Tsx, "type_alias_declaration") => Kind::TypeAlias,
+        (L::TypeScript | L::Tsx, "enum_declaration") => Kind::Enum,
+        (L::TypeScript | L::Tsx | L::JavaScript, "method_definition") => Kind::Method,
+
+        (L::Python, "function_definition") => Kind::Function,
+        (L::Python, "class_definition") => Kind::Class,
+
+        (L::Go, "function_declaration") => Kind::Function,
+        (L::Go, "method_declaration") => Kind::Method,
+        (L::Go, "type_declaration") => Kind::TypeAlias,
+
+        (L::Java, "class_declaration") => Kind::Class,
+        (L::Java, "interface_declaration") => Kind::Interface,
+        (L::Java, "method_declaration") => Kind::Method,
+
+        (L::C | L::Cpp, "function_definition") => Kind::Function,
+        (L::C | L::Cpp, "struct_specifier") => Kind::Struct,
+        (L::Cpp, "class_specifier") => Kind::Class,
+
+        (L::Ruby, "method") => Kind::Method,
+        (L::Ruby, "class") => Kind::Class,
+
+        (L::Swift, "function_declaration") => Kind::Function,
+        (L::Swift, "class_declaration") => Kind::Class,
+
+        (L::Kotlin, "function_declaration") => Kind::Function,
+        (L::Kotlin, "class_declaration") => Kind::Class,
+
+        _ => return None,
+    })
 }
 
-/// Pull symbols out of one file's text.
-pub fn extract(text: &str, lang: Lang, file: u32) -> Vec<Symbol> {
-    let lines: Vec<&str> = text.lines().collect();
+/// The declared name of a node.
+///
+/// Tree-sitter grammars disagree on field names, so try the common ones and
+/// fall back to the first identifier-shaped child.
+fn name_of<D: ast_grep_core::Doc>(node: &Node<D>) -> Option<String> {
+    for field in ["name", "declarator", "type"] {
+        if let Some(n) = node.field(field) {
+            let text = n.text();
+            if !text.is_empty() {
+                // A declarator can carry parameters; the name is its head.
+                return Some(first_identifier(&text));
+            }
+        }
+    }
+    node.children()
+        .find(|c| c.kind().ends_with("identifier") || c.kind() == "type_identifier")
+        .map(|c| c.text().to_string())
+}
+
+fn first_identifier(text: &str) -> String {
+    let text = text.trim_start_matches(['*', '&', ' ']);
+    let end = text
+        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
+        .unwrap_or(text.len());
+    text[..end].to_string()
+}
+
+/// Parse `text` and return the symbols it declares.
+pub fn extract(text: &str, lang: SupportLang, file: u32) -> Vec<Symbol> {
+    let ast = AstGrep::new(text, lang);
+    // Byte offset -> line, computed once rather than per symbol.
+    let line_index = LineIndex::new(text);
+
     let mut out = Vec::new();
-
-    for (i, raw) in lines.iter().enumerate() {
-        let line = raw.trim_start();
-        if line.is_empty()
-            || line.starts_with("//")
-            || line.starts_with('#') && lang != Lang::Python
-        {
+    for node in ast.root().dfs() {
+        let Some(kind) = kind_of(lang, &node.kind()) else {
+            continue;
+        };
+        let Some(name) = name_of(&node) else { continue };
+        if name.is_empty() {
             continue;
         }
 
-        let Some((kind, name)) = declaration(line, lang) else {
-            continue;
-        };
-        // Skip obvious noise: single-letter names are usually generics or loop vars
-        // that slipped past the crude matcher.
-        if name.len() < 2
-            || !name
-                .chars()
-                .next()
-                .is_some_and(|c| c.is_alphabetic() || c == '_')
-        {
-            continue;
-        }
-
-        let end = match lang {
-            Lang::Python => end_by_indent(&lines, i),
-            _ => end_by_braces(&lines, i),
-        };
+        let range = node.range();
+        let line_start = line_index.line_of(range.start);
+        let line_end = line_index.line_of(range.end.saturating_sub(1));
 
         out.push(Symbol {
-            name: name.to_string(),
+            name,
             kind,
             file,
-            line_start: (i + 1) as u32,
-            line_end: end as u32,
-            signature: line
-                .trim_end()
-                .trim_end_matches('{')
-                .trim()
-                .chars()
-                .take(200)
-                .collect(),
+            line_start,
+            line_end,
+            signature: signature_at(text, line_start),
         });
     }
     out
 }
 
-fn declaration(line: &str, lang: Lang) -> Option<(Kind, &str)> {
-    // Strip modifiers so one set of patterns covers `pub async fn`, `export
-    // default class`, and friends.
-    let mut s = line;
-    for m in [
-        "pub(crate) ",
-        "pub(super) ",
-        "pub ",
-        "export default ",
-        "export ",
-        "async ",
-        "default ",
-        "const ",
-        "static ",
-        "abstract ",
-        "declare ",
-        "unsafe ",
-        "extern ",
-    ] {
-        if let Some(rest) = s.strip_prefix(m) {
-            // `const NAME =` in TS/Rust is itself a declaration worth keeping.
-            if m == "const " || m == "static " {
-                if let Some(name) = ident_after(rest, "") {
-                    if rest.contains('=') || rest.contains(':') {
-                        return Some((Kind::Const, name));
-                    }
-                }
-            }
-            s = rest;
-        }
-    }
-
-    let pairs: &[(&str, Kind)] = match lang {
-        Lang::Rust => &[
-            ("fn ", Kind::Function),
-            ("struct ", Kind::Struct),
-            ("enum ", Kind::Enum),
-            ("trait ", Kind::Trait),
-            ("type ", Kind::TypeAlias),
-        ],
-        Lang::TypeScript => &[
-            ("function ", Kind::Function),
-            ("class ", Kind::Class),
-            ("interface ", Kind::Interface),
-            ("type ", Kind::TypeAlias),
-            ("enum ", Kind::Enum),
-        ],
-        Lang::Python => &[("def ", Kind::Function), ("class ", Kind::Class)],
-        Lang::Go => &[("func ", Kind::Function), ("type ", Kind::TypeAlias)],
+/// The declaration line, trimmed of a trailing brace.
+fn signature_at(text: &str, line: u32) -> String {
+    let Some(raw) = text.lines().nth(line.saturating_sub(1) as usize) else {
+        return String::new();
     };
-
-    for (prefix, kind) in pairs {
-        if let Some(rest) = s.strip_prefix(prefix) {
-            if let Some(name) = ident_after(rest, "") {
-                return Some((*kind, name));
-            }
-        }
-    }
-    None
+    raw.trim()
+        .trim_end_matches('{')
+        .trim()
+        .chars()
+        .take(200)
+        .collect()
 }
 
-/// First identifier in `s`, skipping an optional prefix.
-fn ident_after<'a>(s: &'a str, skip: &str) -> Option<&'a str> {
-    let s = s.strip_prefix(skip).unwrap_or(s).trim_start();
-    let s = s.strip_prefix('*').unwrap_or(s); // go pointer receivers
-    let end = s
-        .find(|c: char| !(c.is_alphanumeric() || c == '_' || c == '$'))
-        .unwrap_or(s.len());
-    if end == 0 {
-        return None;
-    }
-    Some(&s[..end])
+/// Byte offset to 1-based line number.
+struct LineIndex {
+    starts: Vec<usize>,
 }
 
-/// Walk braces from the declaration to find the body's last line.
-///
-/// Approximate by design: strings and comments containing braces will fool it.
-/// A parser would not, which is the main thing tree-sitter would buy.
-fn end_by_braces(lines: &[&str], start: usize) -> usize {
-    let mut depth = 0i32;
-    let mut opened = false;
+impl LineIndex {
+    fn new(text: &str) -> Self {
+        let mut starts = vec![0usize];
+        starts.extend(
+            text.bytes()
+                .enumerate()
+                .filter(|(_, b)| *b == b'\n')
+                .map(|(i, _)| i + 1),
+        );
+        Self { starts }
+    }
 
-    for (offset, line) in lines[start..].iter().enumerate() {
-        for ch in line.chars() {
-            match ch {
-                '{' => {
-                    depth += 1;
-                    opened = true;
-                }
-                '}' => depth -= 1,
-                _ => {}
-            }
-        }
-        if opened && depth <= 0 {
-            return start + offset + 1;
-        }
-        // A declaration with no body (trait method, type alias) ends on its line.
-        if !opened && line.trim_end().ends_with(';') {
-            return start + offset + 1;
-        }
-        if offset > 3000 {
-            break; // runaway guard
+    fn line_of(&self, offset: usize) -> u32 {
+        match self.starts.binary_search(&offset) {
+            Ok(i) => (i + 1) as u32,
+            Err(i) => i as u32,
         }
     }
-    start + 1
-}
-
-/// Python bodies end where indentation returns to the declaration's level.
-fn end_by_indent(lines: &[&str], start: usize) -> usize {
-    let base = indent_of(lines[start]);
-    let mut last = start;
-    for (offset, line) in lines[start + 1..].iter().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        if indent_of(line) <= base {
-            return start + offset + 1;
-        }
-        last = start + offset + 1;
-    }
-    last + 1
-}
-
-fn indent_of(line: &str) -> usize {
-    line.len() - line.trim_start().len()
 }

@@ -66,8 +66,15 @@ fn a_client_can_initialize_list_and_call_over_stdio() {
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(responses[0]["result"]["protocolVersion"], "2025-06-18");
 
+    // Not pinned to a count: the reference binary registers demo tools plus
+    // whatever the config enables, and that set is meant to grow.
     let tools = responses[1]["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.len(), 2);
+    assert!(
+        tools.len() >= 2,
+        "expected several tools, got {}",
+        tools.len()
+    );
+    assert!(tools.iter().any(|t| t["name"] == "word_frequency"));
 
     let call = &responses[2]["result"];
     assert_eq!(call["isError"], false);

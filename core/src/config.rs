@@ -27,6 +27,20 @@ pub struct Config {
     pub schema: SchemaConfig,
     #[serde(default)]
     pub plugins: PluginConfig,
+    #[serde(default)]
+    pub index: IndexConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexConfig {
+    /// Register `sym` and `outline` over this root. Empty disables them.
+    pub root: String,
+}
+
+impl Default for IndexConfig {
+    fn default() -> Self {
+        Self { root: ".".into() }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

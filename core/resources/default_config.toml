@@ -46,3 +46,7 @@ snapshots = []
 # Project is loaded after global, so a repo can override an inherited tool.
 global = "~/.portkit/plugins.toml"
 project = ".portkit/plugins.toml"
+
+[index]
+# Repository root for `sym` and `outline`. Empty string disables them.
+root = "."

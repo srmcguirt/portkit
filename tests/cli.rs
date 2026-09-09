@@ -34,8 +34,15 @@ fn tools_json_emits_parseable_specs() {
     let out = pk().args(["tools", "--json"]).assert().success();
     let specs: Vec<serde_json::Value> =
         serde_json::from_slice(&out.get_output().stdout).expect("--json must emit valid JSON");
-    assert_eq!(specs.len(), 2);
-    assert!(specs[0]["input_schema"].is_object());
+    // Not pinned to a count: the reference binary registers demo tools plus
+    // whatever the config enables, and that set is meant to grow.
+    assert!(
+        specs.len() >= 2,
+        "expected several tools, got {}",
+        specs.len()
+    );
+    assert!(specs.iter().all(|s| s["input_schema"].is_object()));
+    assert!(specs.iter().any(|s| s["name"] == "chunk_text"));
 }
 
 #[test]

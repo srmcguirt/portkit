@@ -59,6 +59,10 @@ fn registry(config: &Config) -> Registry {
         }
     }
 
+    if !config.index.root.trim().is_empty() {
+        portkit_index::register(&mut registry, std::path::PathBuf::from(&config.index.root));
+    }
+
     load_plugins(&mut registry, config);
 
     registry
