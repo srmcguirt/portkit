@@ -44,6 +44,7 @@ pub mod diff;
 pub mod error;
 pub mod registry;
 pub mod tool;
+pub mod validate;
 
 pub use async_trait::async_trait;
 
@@ -52,3 +53,4 @@ pub use diff::{diff, matches, DiffKind, DiffOptions, Difference};
 pub use error::{Error, Result};
 pub use registry::Registry;
 pub use tool::{Tool, ToolSpec};
+pub use validate::InputValidator;

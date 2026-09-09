@@ -7,6 +7,7 @@ use serde_json::Value;
 
 use crate::error::{Error, Result};
 use crate::tool::{Tool, ToolSpec};
+use crate::validate::InputValidator;
 
 /// The set of tools a binary exposes.
 ///
@@ -15,6 +16,9 @@ use crate::tool::{Tool, ToolSpec};
 #[derive(Default, Clone)]
 pub struct Registry {
     tools: BTreeMap<String, Arc<dyn Tool>>,
+    /// Compiled once at registration. Every surface — CLI, MCP, replay —
+    /// reaches tools through `call`, so validating here validates everywhere.
+    validators: BTreeMap<String, Arc<InputValidator>>,
 }
 
 impl Registry {
@@ -25,7 +29,12 @@ impl Registry {
     /// Register a tool, replacing any previous tool of the same name.
     pub fn register<T: Tool>(&mut self, tool: T) -> &mut Self {
         let tool: Arc<dyn Tool> = Arc::new(tool);
-        self.tools.insert(tool.name(), tool);
+        let spec = tool.spec();
+        self.validators.insert(
+            spec.name.clone(),
+            Arc::new(InputValidator::compile(&spec.name, &spec.input_schema)),
+        );
+        self.tools.insert(spec.name, tool);
         self
     }
 
@@ -56,8 +65,23 @@ impl Registry {
         self.tools.is_empty()
     }
 
-    /// Look up and invoke a tool by name.
+    /// Look up and invoke a tool by name, validating the arguments first.
+    ///
+    /// Validation happens here rather than in each tool so that a tool cannot
+    /// drift from its published schema, and so every surface reports the same
+    /// error shape.
     pub async fn call(&self, name: &str, input: Value) -> Result<Value> {
+        if let Some(validator) = self.validators.get(name) {
+            validator.check(&input)?;
+        }
+        self.call_unchecked(name, input).await
+    }
+
+    /// Invoke without schema validation.
+    ///
+    /// For callers that have already validated, or that deliberately need to
+    /// exercise a tool's own error handling.
+    pub async fn call_unchecked(&self, name: &str, input: Value) -> Result<Value> {
         let tool = self
             .get(name)
             .ok_or_else(|| Error::UnknownTool(name.to_string()))?

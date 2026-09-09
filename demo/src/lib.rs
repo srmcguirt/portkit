@@ -37,7 +37,8 @@ impl Tool for ChunkText {
                         "description": "Characters each chunk repeats from the previous one. Must be less than size."
                     }
                 },
-                "required": ["text"]
+                "required": ["text"],
+                "additionalProperties": false
             }),
         )
         .with_output_schema(json!({
@@ -126,7 +127,8 @@ impl Tool for WordFrequency {
                         "description": "How many of the most frequent words to return."
                     }
                 },
-                "required": ["text"]
+                "required": ["text"],
+                "additionalProperties": false
             }),
         )
     }
