@@ -1428,8 +1428,10 @@ version = "0.1.0"
 dependencies = [
  "assert_cmd",
  "portkit-cli",
+ "portkit-core",
  "portkit-demo",
  "portkit-port",
+ "portkit-schema",
  "predicates",
  "serde_json",
  "tempfile",

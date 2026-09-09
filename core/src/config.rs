@@ -23,6 +23,20 @@ pub struct Config {
     pub output: OutputConfig,
     #[serde(default)]
     pub trace: TraceConfig,
+    #[serde(default)]
+    pub schema: SchemaConfig,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SchemaConfig {
+    /// Committed snapshot files to load at startup. Each is registered under
+    /// the source name in its own provenance, so tools name sources
+    /// explicitly rather than guessing.
+    ///
+    /// Loaded before `tools/list` is answered: an agent's first view of the
+    /// interface should already be grounded in real facts.
+    #[serde(default)]
+    pub snapshots: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -60,6 +60,8 @@ tempfile = "3"
 [dependencies]
 portkit-cli.workspace = true
 portkit-demo.workspace = true
+portkit-schema.workspace = true
+portkit-core.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

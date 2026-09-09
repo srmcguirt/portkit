@@ -169,6 +169,41 @@ whole value, so the parity harness compares what the tool actually produced.
 Trimming before the harness saw it would make fixtures agree with a summary
 rather than with the port.
 
+## Schema tools
+
+Point the config at a captured snapshot and `pk serve` exposes the schema
+capability as real tools:
+
+```toml
+[schema]
+snapshots = [".portkit/schema/fellwork.json"]
+```
+
+```
+$ pk tools
+  chunk_text      ...
+  schema_check    Check that a table, or a column of a table, actually exists
+  schema_columns  Report the real columns of a table, with types and nullability
+  schema_tables   List tables known to a schema snapshot
+
+$ pk run schema_check -a source=fellwork -a table=source.tokens -a column=verse_ref
+{"exists":false,"kind":"column","name":"verse_ref","suggestions":["verse_id"],
+ "provenance":{"source":"fellwork","kind":"postgres_catalog",
+               "captured_at":"2026-09-09T19:42:44Z","fingerprint":"37902a5df4df512c"}}
+```
+
+Registering matters beyond convenience: a tool in the registry inherits
+argument validation, output budgets, provenance and tracing. Shelling out to a
+separate binary bypasses all four. Registration also wires the same snapshots
+in as the `x-schema-ref` resolver, so the tools reporting on a schema and the
+gate checking against it can never disagree.
+
+Snapshots load **before** `tools/list` is answered — an agent's first view of
+the interface should already be grounded rather than corrected after its first
+wrong guess. That is why `portkit_cli::run_with` takes a builder rather than a
+finished registry: tools that depend on configuration cannot exist before
+`--config` is parsed.
+
 ## Measuring what tools cost
 
 Claude Code exports OpenTelemetry — counts, latencies, token totals per

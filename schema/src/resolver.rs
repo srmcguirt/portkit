@@ -44,6 +44,25 @@ impl SchemaRegistry {
         Ok(self)
     }
 
+    /// Load several committed snapshots.
+    ///
+    /// A snapshot that fails to load is reported and skipped rather than
+    /// aborting startup: one bad file should not take the server down, and a
+    /// missing source declines at check time rather than passing silently.
+    pub fn from_paths<P: AsRef<Path>>(paths: &[P]) -> (Self, Vec<String>) {
+        let mut registry = Self::new();
+        let mut problems = Vec::new();
+        for p in paths {
+            match Snapshot::load(p.as_ref()) {
+                Ok(s) => {
+                    registry.insert(s);
+                }
+                Err(e) => problems.push(format!("{}: {e}", p.as_ref().display())),
+            }
+        }
+        (registry, problems)
+    }
+
     pub fn get(&self, source: &str) -> Option<&Snapshot> {
         self.sources.get(source)
     }

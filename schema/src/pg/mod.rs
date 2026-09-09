@@ -13,6 +13,13 @@
 //!
 //! Re-sync by diffing against that path in magna and updating the commit above.
 //!
+//! # Deviations
+//!
+//! - `queries.rs` `QUERY_TYPES` also matches `pg_catalog`. Built-in types are
+//!   defined there, not in the schemas a caller asks about, so without it
+//!   every column's `data_type` came back `unknown`. Marked `PORTKIT
+//!   DEVIATION` in the source.
+//!
 pub mod cache;
 pub mod introspect;
 pub mod queries;

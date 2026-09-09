@@ -122,8 +122,14 @@ SELECT
     t.typrelid::int4       AS class_oid,
     (t.typtype = 'e')      AS is_enum
 FROM pg_catalog.pg_type t
-WHERE t.typnamespace = ANY(
-    SELECT n.oid FROM pg_catalog.pg_namespace n WHERE n.nspname = ANY($1)
+WHERE (
+    t.typnamespace = ANY(
+        SELECT n.oid FROM pg_catalog.pg_namespace n WHERE n.nspname = ANY($1)
+    )
+    -- PORTKIT DEVIATION from magna-introspect: built-in types (text, int4,
+    -- uuid) live in pg_catalog, which is never among the schemas a caller
+    -- asks about. Without this every column's type resolves to "unknown".
+    OR t.typnamespace = 'pg_catalog'::regnamespace
 )
 ORDER BY t.typnamespace, t.typname
 "#;

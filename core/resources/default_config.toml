@@ -34,3 +34,8 @@ min_items = 3
 # rather than assumed. Off by default; `pk trace` reads what it writes.
 enabled = false
 dir = ".portkit/traces"
+
+[schema]
+# Committed snapshot files, loaded at startup so `tools/list` is already
+# grounded. Capture one with `pks pull`.
+snapshots = []

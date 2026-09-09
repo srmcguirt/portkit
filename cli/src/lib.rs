@@ -26,6 +26,19 @@ use portkit_core::{Config, Registry};
 /// Errors are printed to stderr — stdout stays reserved for command output and
 /// for the MCP protocol stream.
 pub async fn run(registry: Registry) -> ExitCode {
+    run_with(|_| registry).await
+}
+
+/// Build the registry from the effective config, then run.
+///
+/// Tools that depend on configuration — schema snapshots, index paths — cannot
+/// be constructed before `--config` and `PK_*` have been resolved. Taking a
+/// builder rather than a finished registry is what lets them exist at all,
+/// and keeps argument parsing in one place.
+pub async fn run_with<F>(build: F) -> ExitCode
+where
+    F: FnOnce(&Config) -> Registry,
+{
     let cli = Cli::parse();
 
     let config = match Config::load(cli.config.as_deref()) {
@@ -42,6 +55,9 @@ pub async fn run(registry: Registry) -> ExitCode {
     };
 
     logging::init(&config.log.level);
+
+    // Built here, after config: `tools/list` must already be grounded.
+    let registry = build(&config);
 
     match cli.command.execute(registry, &config).await {
         Ok(code) => code,
