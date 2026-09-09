@@ -9,6 +9,13 @@ repository.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Live introspection needs sqlx, which is 175 of this crate's 247 dependencies.
+# A repo that validates against committed snapshots never runs that code, so it
+# is off by default and the snapshot/check/tools path stays dependency-light.
+default = []
+postgres = ["dep:sqlx", "dep:moka"]
+
 [dependencies]
 portkit-core.workspace = true
 serde.workspace = true
@@ -17,8 +24,8 @@ tokio.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
 time.workspace = true
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
-moka = { version = "0.12", features = ["future"] }
+sqlx = { optional = true, version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+moka = { optional = true, version = "0.12", features = ["future"] }
 thiserror.workspace = true
 
 [dev-dependencies]

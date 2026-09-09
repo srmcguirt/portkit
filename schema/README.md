@@ -58,6 +58,19 @@ approve a column that was dropped.
 Locators never carry credentials; provenance travels into agent context and
 into commits. There is a test for that.
 
+## Live capture is feature-gated
+
+`sqlx` is **175 of this crate's 247 dependencies**, and a repo that validates
+against a committed snapshot never runs that code. So capture is opt-in:
+
+```bash
+cargo build                                  # 115 crates — snapshot, check, tools
+cargo build --features postgres              # 247 crates — adds `pks pull`
+```
+
+Without the feature `pks pull` explains itself and exits non-zero; `show` and
+`check` work unchanged. CI exercises both, or the gated path would rot.
+
 ## Provenance of the code
 
 `src/pg/` is vendored from `magna-introspect` (github.com/fellwork/magna),

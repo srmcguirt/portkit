@@ -11,6 +11,7 @@
 //! So read the catalog, [`Snapshot`] it with [`Provenance`], commit that, and
 //! check against it. The same bargain the parity harness makes with fixtures.
 
+#[cfg(feature = "postgres")]
 pub mod pg;
 pub mod resolve;
 pub mod resolver;
@@ -22,14 +23,20 @@ pub use resolver::SchemaRegistry;
 pub use snapshot::{Column, Provenance, Snapshot, SourceKind, Table};
 pub use tools::register;
 
+#[cfg(feature = "postgres")]
 use std::collections::BTreeMap;
 
+#[cfg(feature = "postgres")]
 use portkit_core::Result;
 
 /// Introspect a live database and materialize a fingerprinted snapshot.
 ///
+/// Requires the `postgres` feature. Checking against a committed snapshot does
+/// not, which is the common case in CI and for anyone without credentials.
+///
 /// `locator` is recorded in the provenance and must not be a connection
 /// string — provenance travels into agent context and often into commits.
+#[cfg(feature = "postgres")]
 pub async fn capture(
     pool: &sqlx::PgPool,
     schemas: &[&str],
@@ -45,6 +52,7 @@ pub async fn capture(
     Ok(snapshot)
 }
 
+#[cfg(feature = "postgres")]
 /// Fold pg_catalog rows into the flat shape a checker needs.
 ///
 /// The catalog is normalized by oid; a checker wants names. Most of this is

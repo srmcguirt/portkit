@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use portkit_schema::{capture, resolve_column, resolve_table, Resolution, Snapshot};
+use portkit_schema::{resolve_column, resolve_table, Resolution, Snapshot};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -23,7 +23,16 @@ async fn main() -> ExitCode {
     }
 }
 
+#[cfg(not(feature = "postgres"))]
+async fn pull(_args: &[String]) -> ExitCode {
+    eprintln!("`pks pull` needs live introspection: rebuild with --features postgres");
+    eprintln!("(`show` and `check` work from a committed snapshot without it)");
+    ExitCode::FAILURE
+}
+
+#[cfg(feature = "postgres")]
 async fn pull(args: &[String]) -> ExitCode {
+    use portkit_schema::capture;
     let (Some(dsn), Some(out)) = (args.get(1), args.get(2)) else {
         eprintln!("usage: pks pull <dsn> <out.json> [schema...]");
         return ExitCode::FAILURE;
@@ -152,6 +161,7 @@ fn provenance(s: &Snapshot) {
 }
 
 /// Strip credentials from a DSN so provenance can be committed safely.
+#[cfg(feature = "postgres")]
 fn sanitize(dsn: &str) -> String {
     match dsn.split_once("://") {
         Some((scheme, rest)) => {
