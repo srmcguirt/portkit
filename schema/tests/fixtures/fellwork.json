@@ -1,0 +1,162 @@
+{
+  "provenance": {
+    "source": "fellwork",
+    "kind": "postgres_catalog",
+    "locator": "postgres://%2Ftmp%2Fpks/fw2",
+    "captured_at": "2026-09-09T17:42:14.41164Z",
+    "fingerprint": "4d19c1cb9acf6e21"
+  },
+  "tables": {
+    "source.tokens": {
+      "name": "source.tokens",
+      "schema": "source",
+      "kind": "table",
+      "columns": [
+        {
+          "name": "gloss",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "lemma",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "morphology_code",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "morphology_human",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "pointed_form",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "position",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "strong_number",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "surface_form",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "token_type",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "transliteration",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "verse_id",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "vocabulary_item_id",
+          "data_type": "unknown",
+          "nullable": true
+        }
+      ]
+    },
+    "source.verses": {
+      "name": "source.verses",
+      "schema": "source",
+      "kind": "table",
+      "columns": [
+        {
+          "name": "book",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "book_order",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "chapter",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "data_gap_note",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "data_gap_reason",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "difficulty_score",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "id",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "original_text",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "pointed_text",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "reference",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "source_language",
+          "data_type": "unknown",
+          "nullable": false
+        },
+        {
+          "name": "token_count",
+          "data_type": "unknown",
+          "nullable": true
+        },
+        {
+          "name": "verse",
+          "data_type": "unknown",
+          "nullable": false
+        }
+      ]
+    }
+  },
+  "enums": {},
+  "functions": []
+}
