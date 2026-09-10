@@ -17,3 +17,7 @@ async-trait.workspace = true
 tracing.workspace = true
 config.workspace = true
 time.workspace = true
+regex = "1"
+
+[dev-dependencies]
+tempfile.workspace = true

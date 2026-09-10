@@ -14,6 +14,7 @@
 mod commands;
 mod hook;
 mod logging;
+mod verify;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -163,6 +164,26 @@ pub enum Command {
         event: String,
     },
 
+    /// Pair-run rewrite rules against the ledger and record the outcome.
+    Verify {
+        /// Manifest of rewrite rules.
+        #[arg(
+            short,
+            long,
+            value_name = "FILE",
+            default_value = ".portkit/rewrites.json"
+        )]
+        manifest: PathBuf,
+
+        /// How many recent ledger commands to replay.
+        #[arg(short, long, default_value_t = 500)]
+        window: usize,
+
+        /// Record the results. Without it this is a dry run.
+        #[arg(long)]
+        apply: bool,
+    },
+
     /// Summarize recorded tool-call costs.
     Trace {
         /// Directory of JSONL trace files. Defaults to the configured dir.
@@ -286,6 +307,11 @@ impl Command {
             Command::Serve { transport } => commands::serve(registry, config, transport).await,
             Command::Port { command } => commands::port(&registry, config, command).await,
             Command::Hook { event } => Ok(hook::run(&event, config)),
+            Command::Verify {
+                manifest,
+                window,
+                apply,
+            } => verify::run(config, &manifest, window, apply),
             Command::Trace { dir, json } => commands::trace(config, dir, json),
             Command::Config => commands::show_config(config),
             Command::Completion { shell } => {

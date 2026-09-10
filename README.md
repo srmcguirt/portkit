@@ -302,6 +302,57 @@ only the surfaces know what was *delivered* after budgeting — and delivered is
 what context pays for. Off by default; JSONL, one object per line, so a crash
 costs at most one record.
 
+## Rewrite rules and verification
+
+A rule may only rewrite once its own `verified.status` is `pass` — per rule,
+not per binary, since `--range` and `--ls` are never ready at the same time.
+Everything else falls through to suggest-only, which costs tokens but cannot
+be wrong.
+
+```json
+{ "name": "sed-range",
+  "matches": "^sed -n '?(\\d+),(\\d+)p'? (\\S+)$",
+  "rewrite": "pk-read --range $1:$2 $3",
+  "fidelity": "subset-declared",
+  "recovery": "pk-read --range $1:$2 $3 --full",
+  "verified": { "status": "pending" } }
+```
+
+### Fidelity classes
+
+Byte-equality forecloses the win — identical bytes are identical tokens — but
+"semantically equivalent" is too vague to implement. So each class carries a
+gate that can actually be checked:
+
+| class | gate |
+| --- | --- |
+| `exact` | byte-identical |
+| `normalized` | equal after a **declared, versioned** transform |
+| `subset-declared` | ordered subset, and the omission is declared |
+| `keyset` | identifying names preserved; columns may drop |
+| `reference` | *not registration-verifiable* — a claim about caller state |
+
+An unknown normalizer fails rather than passing, or a verification means
+whatever the current binary happens to do.
+
+### Pair-run verification
+
+The ledger records commands, not the bytes they returned, so history cannot be
+reproduced. `pk verify` runs the original and its rewrite **now**, against the
+same tree, and applies the class gate to the pair:
+
+```
+$ pk verify --window 500
+  sed-range         1 cases     1 passed     0 skipped  -> Pass
+  ls-keyset         1 cases     1 passed     0 skipped  -> Pass
+  cat-outline       0 cases     0 passed     0 skipped  -> Pending
+```
+
+Cases whose target no longer exists are **skipped and counted**, never quietly
+dropped: a rule that passed two of four hundred has not been verified. The
+recorded result carries `tree_sha`, because a rewrite verified against one
+working tree says little about another.
+
 ## Watching the agent
 
 portkit's own traces only ever saw portkit's own tools, while the expensive
