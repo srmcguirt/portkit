@@ -26,6 +26,22 @@ pub fn hash_file(path: &Path) -> Option<String> {
     Some(blake3::hash(&bytes).to_hex().to_string())
 }
 
+/// Where session state lives: `~/.portkit/read/`, never the working directory.
+///
+/// `PORTKIT_STATE_DIR` overrides it. That exists so tests can isolate — moving
+/// state out of the working directory also moved it out of reach of a tempdir
+/// — and it lets anyone put state somewhere other than home.
+pub fn state_dir() -> std::path::PathBuf {
+    if let Some(dir) = std::env::var_os("PORTKIT_STATE_DIR") {
+        return std::path::PathBuf::from(dir);
+    }
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join(".portkit")
+        .join("read")
+}
+
 pub fn now_rfc3339() -> String {
     use time::format_description::well_known::Rfc3339;
     time::OffsetDateTime::now_utc()

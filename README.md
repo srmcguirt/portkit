@@ -302,6 +302,29 @@ only the surfaces know what was *delivered* after budgeting — and delivered is
 what context pays for. Off by default; JSONL, one object per line, so a crash
 costs at most one record.
 
+## Is this session actually watched?
+
+Hooks fail silently by design — one that breaks the session it measures is
+worse than one that measures nothing. The cost is that a misconfigured setup
+looks exactly like a quiet one, and you find out weeks later that the ledger
+is empty.
+
+```
+$ pk doctor
+  MISS  pk on PATH        not found
+  MISS  hooks registered  not in any of 3 settings files
+  MISS  tracing enabled   [trace] enabled = false
+  MISS  hooks have fired  no agent-surface records
+```
+
+Four checks, reported separately because they fail for different reasons and
+need different fixes. The last is the only one that is *evidence* rather than
+intent: registered hooks that never fire look identical to no hooks at all.
+Exits non-zero, so a setup script can gate on it.
+
+State — the symbol index and `pk-read`'s delivery ledger — lives in
+`~/.portkit/`, never the working directory. `PORTKIT_STATE_DIR` overrides it.
+
 ## Rewrite rules and verification
 
 A rule may only rewrite once its own `verified.status` is `pass` — per rule,

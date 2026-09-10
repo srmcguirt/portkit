@@ -12,6 +12,7 @@
 //! ```
 
 mod commands;
+mod doctor;
 mod hook;
 mod logging;
 mod verify;
@@ -195,6 +196,9 @@ pub enum Command {
         json: bool,
     },
 
+    /// Check whether this session is actually being watched.
+    Doctor,
+
     /// Show the effective configuration after all layers are applied.
     Config,
 
@@ -313,6 +317,7 @@ impl Command {
                 apply,
             } => verify::run(config, &manifest, window, apply),
             Command::Trace { dir, json } => commands::trace(config, dir, json),
+            Command::Doctor => doctor::run(config),
             Command::Config => commands::show_config(config),
             Command::Completion { shell } => {
                 commands::completion(shell);

@@ -114,8 +114,27 @@ impl Index {
         Ok((index, BuildStats { walk_ms, parse_ms }))
     }
 
+    /// Where this root's index is cached.
+    ///
+    /// Central, never inside the indexed tree. Writing `.portkit/cache/` into
+    /// the working directory littered 43 files across unrelated repositories —
+    /// agents invoke tools from wherever they happen to be, and a cache that
+    /// follows them is a cache that vandalises them.
     pub fn cache_path(root: &Path) -> PathBuf {
-        root.join(".portkit").join("cache").join("symbols.json")
+        let abs = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
+        let mut h = Fnv::new();
+        h.write(abs.to_string_lossy().as_bytes());
+        let name = format!("{:016x}.json", h.finish());
+
+        let base = match std::env::var_os("PORTKIT_STATE_DIR") {
+            Some(dir) => PathBuf::from(dir).join("index"),
+            None => std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(std::env::temp_dir)
+                .join(".portkit")
+                .join("index"),
+        };
+        base.join(name)
     }
 
     pub fn save(&self, root: &Path) -> std::io::Result<u64> {

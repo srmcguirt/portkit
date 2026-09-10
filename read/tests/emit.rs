@@ -30,6 +30,7 @@ impl Session {
             .args(args)
             .current_dir(self.dir.path())
             .env("PORTKIT_SESSION", "test")
+            .env("PORTKIT_STATE_DIR", self.dir.path().join("state"))
             .output()
             .expect("pk-read must run");
         String::from_utf8_lossy(&out.stdout).to_string()
@@ -148,6 +149,7 @@ fn separate_sessions_do_not_share_deliveries() {
         .args(["--range", "10:20", "f.txt"])
         .current_dir(s.path())
         .env("PORTKIT_SESSION", "a-different-worker")
+        .env("PORTKIT_STATE_DIR", s.path().join("state"))
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&out.stdout);

@@ -77,9 +77,7 @@ fn state_path() -> PathBuf {
         .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
         .take(48)
         .collect();
-    PathBuf::from(".portkit")
-        .join("read")
-        .join(format!("{safe}.json"))
+    portkit_read::state_dir().join(format!("{safe}.json"))
 }
 
 fn read(path: &Path, range: Option<Interval>, full: bool, state_path: &Path) -> ExitCode {
