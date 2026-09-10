@@ -21,7 +21,7 @@ path = "src/main.rs"
 
 [workspace]
 resolver = "2"
-members = ["core", "mcp", "port", "cli", "demo", "index", "schema", "plugin"]
+members = ["core", "mcp", "port", "cli", "demo", "index", "schema", "plugin", "read"]
 
 [workspace.package]
 version = "0.1.0"
@@ -40,6 +40,7 @@ portkit-demo = { version = "0.1.0", path = "demo" }
 portkit-index = { version = "0.1.0", path = "index" }
 portkit-schema = { version = "0.1.0", path = "schema" }
 portkit-plugin = { version = "0.1.0", path = "plugin" }
+portkit-read = { version = "0.1.0", path = "read" }
 
 thiserror = "2"
 jsonschema = { version = "0.55", default-features = false }

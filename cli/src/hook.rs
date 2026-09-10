@@ -51,12 +51,45 @@ pub fn run(event: &str, config: &Config) -> ExitCode {
 
     match event {
         "pre-tool-use" => rewrite(&payload, config),
+        // Both mean the same thing to a delivery ledger: what we sent may no
+        // longer be in the caller's context.
+        "pre-compact" | "session-start" => mark_compacted(&payload),
         "post-tool-use" => record(&payload, config),
         "user-prompt-submit" => suggest(&payload, config),
         "session-end" => summarize(&payload, config),
         _ => {}
     }
     ExitCode::SUCCESS
+}
+
+/// Treat everything delivered so far as gone.
+///
+/// `pk-read` answers UNCHANGED on the strength of having sent something
+/// earlier in the session. Compaction drops old tool results, so "we sent it"
+/// stops implying "they still have it" — and it stops implying that exactly
+/// when a re-read matters most. Without this watermark the reference class is
+/// unsafe, so it ships with it rather than after it.
+fn mark_compacted(payload: &Payload) {
+    if payload.session_id.is_empty() {
+        return;
+    }
+    let safe: String = payload
+        .session_id
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(48)
+        .collect();
+    let path = PathBuf::from(".portkit")
+        .join("read")
+        .join(format!("{safe}.json"));
+
+    let mut state = portkit_read::SessionState::load(&path);
+    state.mark_compacted(portkit_read::now_rfc3339());
+    // Failing to write means the next UNCHANGED could be a lie, so say so —
+    // silence here is the one place it is not safe.
+    if let Err(err) = state.save(&path) {
+        eprintln!("portkit: could not record compaction watermark: {err}");
+    }
 }
 
 /// How hot a command shape must be before a rewrite is worth verifying.
